@@ -113,7 +113,12 @@ async function collect(what: string | undefined): Promise<void> {
         say("courses", n(courses));
         return;
       }
-      const term = positional[1] ?? currentTerm();
+      // `collect` is dispatched with positional[1] as the thing to collect, so
+      // this case's own argument is the next one along. Reading positional[1]
+      // here crawls a term called "catalog", which finds nothing and reports
+      // success, and there is no way to ask for a term other than the current
+      // one because the fallback can never fire.
+      const term = positional[2] ?? currentTerm();
       const result = await crawlTerm(term, {
         onProgress: (p) =>
           progress(`${blue(term)} ${p.phase}  page ${p.page}/${p.pages}  ${n(p.items)}`),
@@ -126,7 +131,7 @@ async function collect(what: string | undefined): Promise<void> {
     }
 
     case "book": {
-      const year = positional[1] ?? catalogYear();
+      const year = positional[2] ?? catalogYear();
       const book = await crawlBook(year, {
         onProgress: (p) =>
           progress(`${pink(year)}  page ${p.page}/${p.pages}  ${p.programs} programs`),
