@@ -166,7 +166,7 @@
       const GENDER_INK = { male: "#3987e5", female: "#d55181", mixed: "#c98500" };
       const OTHER_INK = "#3a3129";
       const TRAFFIC_INK = "#e0913f";
-      const escape = (text) =>
+      const esc = (text) =>
         String(text ?? "").replace(/[<>&"]/g, (c) => `&#${c.charCodeAt(0)};`);
 
       let mode = "people";
@@ -277,8 +277,8 @@
           if (place.ring.length > 2) {
             const title = `${place.label} — ${people} ${people === 1 ? "person" : "people"}`;
             shapes.push(
-              `<polygon class="place" data-label="${escape(place.label)}" fill="${inkOf(place)}"
-                points="${place.ring.map((p) => p.join(",")).join(" ")}"><title>${escape(title)}</title></polygon>`,
+              `<polygon class="place" data-label="${esc(place.label)}" fill="${inkOf(place)}"
+                points="${place.ring.map((p) => p.join(",")).join(" ")}"><title>${esc(title)}</title></polygon>`,
             );
             labelled.push([place.x, place.y, place.label, people]);
             continue;
@@ -300,16 +300,16 @@
           // A pinned building has a position and no footprint, so it is drawn as
           // what it is: a point, sized by how many people it holds.
           shapes.push(
-            `<circle class="pin" data-label="${escape(names.join("|"))}"
+            `<circle class="pin" data-label="${esc(names.join("|"))}"
               cx="${spot.x}" cy="${spot.y}" r="${6 + Math.sqrt(spot.people)}"
-              fill="${inkOf(spot.places[0])}"><title>${escape(title)}</title></circle>`,
+              fill="${inkOf(spot.places[0])}"><title>${esc(title)}</title></circle>`,
           );
           labelled.push([spot.x, spot.y, shared, spot.people]);
         }
 
         const names = labelled
           .filter(([, , , people]) => people >= 15)
-          .map(([x, y, label]) => `<text class="label" x="${x}" y="${y - 12}">${escape(label)}</text>`)
+          .map(([x, y, label]) => `<text class="label" x="${x}" y="${y - 12}">${esc(label)}</text>`)
           .join("");
 
         main.innerHTML = `
@@ -399,14 +399,14 @@
           .sort((a, b) => b[1] - a[1])
           .map(
             ([name, n]) =>
-              `<tr><td>${escape(shown.length > 1 ? name : className(name))}</td><td class="n">${n}</td></tr>`,
+              `<tr><td>${esc(shown.length > 1 ? name : className(name))}</td><td class="n">${n}</td></tr>`,
           )
           .join("");
 
         document.getElementById("card").innerHTML = `
-          <h2>${escape(commonName(shown.map((p) => p.label)))}</h2>
-          <p>${escape(first.kind)}${first.gender ? ` · ${escape(first.gender)}` : ""} ·
-             ${escape(first.source)}${first.source === "pin" ? " (position only)" : ""}</p>
+          <h2>${esc(commonName(shown.map((p) => p.label)))}</h2>
+          <p>${esc(first.kind)}${first.gender ? ` · ${esc(first.gender)}` : ""} ·
+             ${esc(first.source)}${first.source === "pin" ? " (position only)" : ""}</p>
           <p>${
             [
               residents ? `${residents} live here` : "",
@@ -532,7 +532,7 @@
         main.innerHTML =
           error.message === "unauthorised"
             ? `<div class="gate">this page reads the same token the <a href="/">dashboard</a> holds — unlock there first</div>`
-            : `<div class="gate">${escape(error.message)}</div>`;
+            : `<div class="gate">${esc(error.message)}</div>`;
       }
     </script>
   </body>

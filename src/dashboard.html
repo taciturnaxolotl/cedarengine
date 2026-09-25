@@ -147,7 +147,7 @@
       const tip = document.getElementById("tip");
       const n = (v) => Math.round(v ?? 0).toLocaleString("en-US");
       const pct = (v) => `${Math.round((v ?? 0) * 100)}%`;
-      const escape = (text) =>
+      const esc = (text) =>
         String(text ?? "").replace(/[<>&"]/g, (c) => `&#${c.charCodeAt(0)};`);
 
       const api = async (path) => {
@@ -190,10 +190,10 @@
         return `<div class="wrap"><table>${rows
           .map(
             (row) => `<tr>
-              <td>${escape(row.label)}</td>
+              <td>${esc(row.label)}</td>
               <td class="n">${n(row.value)}</td>
               <td style="width:56%"><i class="bar"
-                data-tip="${escape(`${row.label}: ${n(row.value)}${unit}`)}"
+                data-tip="${esc(`${row.label}: ${n(row.value)}${unit}`)}"
                 style="width:${(row.value / most) * 100}%;background:${ink}"></i></td>
             </tr>`,
           )
@@ -226,7 +226,7 @@
                 cell?.sections ?? 0,
               )} sections`;
               return `<rect class="cell" x="${left + col * w}" y="${top + row * h}" width="${w}"
-                height="${h}" rx="2" fill="${ramp(seats / most)}" data-tip="${escape(label)}"></rect>`;
+                height="${h}" rx="2" fill="${ramp(seats / most)}" data-tip="${esc(label)}"></rect>`;
             }),
           )
           .join("");
@@ -284,7 +284,7 @@
               .map(
                 (p, j) => `<circle cx="${x(j)}" cy="${y(s.of(p))}" r="4.5" fill="${SERIES[i]}"
                   stroke="var(--bg)" stroke-width="2"
-                  data-tip="${escape(`${s.name} · ${p.label} · ${format(s.of(p))}`)}" />`,
+                  data-tip="${esc(`${s.name} · ${p.label} · ${format(s.of(p))}`)}" />`,
               )
               .join("")}`,
           )
@@ -294,7 +294,7 @@
           .map((p, j) =>
             j === 0 || j === points.length - 1 || points.length < 8
               ? `<text class="axis" x="${x(j)}" y="${height - 6}"
-                   text-anchor="middle">${escape(p.label)}</text>`
+                   text-anchor="middle">${esc(p.label)}</text>`
               : "",
           )
           .join("");
@@ -303,7 +303,7 @@
           <div class="legend" style="margin-top:0.5rem">${series
             .map(
               (s, i) =>
-                `<span><i class="swatch" style="background:${SERIES[i]}"></i>${escape(s.name)}</span>`,
+                `<span><i class="swatch" style="background:${SERIES[i]}"></i>${esc(s.name)}</span>`,
             )
             .join("")}</div>`;
       }
@@ -312,7 +312,7 @@
         el.innerHTML = `<div class="gate">
           <p>This engine holds real people's rooms and phone numbers. Paste the bearer token from your <code>.env</code>.</p>
           <input id="token" type="password" placeholder="BEARER_TOKEN" autofocus />
-          <div class="row"><button id="go">Unlock</button><span class="err">${escape(message)}</span></div>
+          <div class="row"><button id="go">Unlock</button><span class="err">${esc(message)}</span></div>
         </div>`;
         const submit = () => {
           localStorage.setItem(KEY, document.getElementById("token").value.trim());
@@ -378,7 +378,7 @@
           api("/v1/majors/distribution").then((data) => fill("study", studyView(data)));
         } catch (error) {
           if (error.message === "unauthorised") gate("that token was not it");
-          else el.innerHTML = `<p class="err">${escape(error.message)}</p>`;
+          else el.innerHTML = `<p class="err">${esc(error.message)}</p>`;
         }
       }
 
