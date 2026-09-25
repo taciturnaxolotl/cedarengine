@@ -7,7 +7,7 @@
  * person, and this is the one place that mapping is written down.
  */
 
-import { badRequest, body, json, notFound, num, q, required } from "../lib/http";
+import { badRequest, body, HttpError, json, notFound, num, q, required } from "../lib/http";
 import {
   assertFacts,
   factDistribution,
@@ -15,6 +15,7 @@ import {
   factKeys,
   factsFor,
   peopleWithFact,
+  retractEvery,
   retractFact,
 } from "../store/facts";
 import { personById } from "../store/people";
@@ -29,6 +30,8 @@ interface RetractBody {
   key?: string;
   source?: string;
   slot?: string;
+  /** Every slot of the key, for when you do not know them or there are many. */
+  allSlots?: boolean;
 }
 
 /** A person has to exist before anything can be said about them. */
@@ -109,7 +112,15 @@ export const factRoutes: RouteDef[] = [
         return { key: fact.key, value: fact.value, slot: fact.slot, source };
       });
 
-      return json({ studentId: id, written: assertFacts(id, prepared) });
+      // The store refuses to mix one-of and several-of for the same key, which
+      // is a caller mistake rather than a server fault.
+      try {
+        return json({ studentId: id, written: assertFacts(id, prepared) });
+      } catch (error) {
+        throw error instanceof Error && !(error instanceof HttpError)
+          ? badRequest(error.message)
+          : error;
+      }
     },
   },
   {
@@ -117,14 +128,21 @@ export const factRoutes: RouteDef[] = [
     path: "/v1/people/:id/facts/retract",
     tag: "facts",
     summary: "Withdraw a fact, by writing down that it is no longer claimed",
-    body: '{ "key": "groupme.id", "source": "assassins", "slot": "" }',
+    body: '{ "key": "groupme.id", "source": "assassins", "slot": "", "allSlots": false }',
     handler: async (request) => {
       const id = requirePerson(request.params.id ?? "");
       const payload = await body<RetractBody>(request);
       if (!payload.key || !payload.source) throw badRequest("key and source are both required");
+
+      if (payload.allSlots) {
+        const n = retractEvery(id, payload.key, payload.source);
+        if (!n) throw notFound("nothing of that key and source is currently asserted");
+        return json({ studentId: id, retracted: n });
+      }
+
       const retracted = retractFact(id, payload.key, payload.source, payload.slot ?? "");
-      if (!retracted) throw notFound("nothing of that key and source is currently asserted");
-      return json({ studentId: id, retracted: true });
+      if (!retracted) throw notFound("nothing of that key, source and slot is currently asserted");
+      return json({ studentId: id, retracted: 1 });
     },
   },
 ];

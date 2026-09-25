@@ -7,6 +7,7 @@ import {
   factKeys,
   factsFor,
   peopleWithFact,
+  retractEvery,
   retractFact,
 } from "../src/store/facts";
 import { searchPeople, upsertPeople } from "../src/store/people";
@@ -229,5 +230,85 @@ describe("searching people by fact", () => {
     upsertPeople([person("1", { DormName: "Lawlor Hall" })], "2026-08-01T00:00:00.000Z");
 
     expect(factsFor("1").map((f) => f.value)).toEqual(["12345"]);
+  });
+});
+
+describe("facts somebody can have more than one of", () => {
+  test("a slot lets one person hold two GroupMe accounts", () => {
+    assertFacts("1", [
+      { key: "groupme.id", slot: "111", value: "111", source: "assassins" },
+      { key: "groupme.id", slot: "222", value: "222", source: "assassins" },
+    ]);
+
+    const ids = factsFor("1").filter((f) => f.key === "groupme.id");
+    expect(ids.map((f) => f.value).sort()).toEqual(["111", "222"]);
+  });
+
+  test("either account finds the person", () => {
+    assertFacts("1", [
+      { key: "groupme.id", slot: "111", value: "111", source: "assassins" },
+      { key: "groupme.id", slot: "222", value: "222", source: "assassins" },
+    ]);
+
+    expect(peopleWithFact("groupme.id", "111")[0]?.studentId).toBe("1");
+    expect(peopleWithFact("groupme.id", "222")[0]?.studentId).toBe("1");
+  });
+
+  test("re-asserting the same account changes nothing about the others", () => {
+    assertFacts("1", [
+      { key: "groupme.id", slot: "111", value: "111", source: "assassins" },
+      { key: "groupme.id", slot: "222", value: "222", source: "assassins" },
+    ]);
+    assertFacts("1", [{ key: "groupme.id", slot: "111", value: "111", source: "assassins" }]);
+
+    expect(factsFor("1").filter((f) => f.key === "groupme.id")).toHaveLength(2);
+  });
+
+  test("one account can be withdrawn without touching the other", () => {
+    assertFacts("1", [
+      { key: "groupme.id", slot: "111", value: "111", source: "assassins" },
+      { key: "groupme.id", slot: "222", value: "222", source: "assassins" },
+    ]);
+    retractFact("1", "groupme.id", "assassins", "111");
+
+    expect(
+      factsFor("1")
+        .filter((f) => f.key === "groupme.id")
+        .map((f) => f.value),
+    ).toEqual(["222"]);
+  });
+
+  test("or all of them at once, without knowing what they were", () => {
+    assertFacts("1", [
+      { key: "groupme.id", slot: "111", value: "111", source: "assassins" },
+      { key: "groupme.id", slot: "222", value: "222", source: "assassins" },
+    ]);
+
+    expect(retractEvery("1", "groupme.id", "assassins")).toBe(2);
+    expect(factsFor("1").filter((f) => f.key === "groupme.id")).toHaveLength(0);
+  });
+
+  test("a slotless assertion over slotted ones is refused, not obeyed", () => {
+    assertFacts("1", [{ key: "groupme.id", slot: "111", value: "111", source: "assassins" }]);
+
+    // Silently replacing both would lose an identity mapping somebody worked out.
+    expect(() =>
+      assertFacts("1", [{ key: "groupme.id", value: "333", source: "assassins" }]),
+    ).toThrow(/pass a slot/);
+    expect(factsFor("1").filter((f) => f.key === "groupme.id")).toHaveLength(1);
+  });
+
+  test("and the other way round, so a single value is never split by accident", () => {
+    assertFacts("1", [{ key: "16p.type", value: "INTJ", source: "survey" }]);
+    expect(() =>
+      assertFacts("1", [{ key: "16p.type", slot: "x", value: "ENFP", source: "survey" }]),
+    ).toThrow(/retract it before giving it slots/);
+  });
+
+  test("a different source is free to do it its own way", () => {
+    assertFacts("1", [{ key: "groupme.id", slot: "111", value: "111", source: "assassins" }]);
+    assertFacts("1", [{ key: "groupme.id", value: "999", source: "manual" }]);
+
+    expect(factsFor("1").filter((f) => f.key === "groupme.id")).toHaveLength(2);
   });
 });

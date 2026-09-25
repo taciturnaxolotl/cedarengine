@@ -64,9 +64,43 @@ const toFact = (row: FactRow): Fact => ({
 export interface Assertion {
   key: string;
   value: unknown;
-  /** Only for a fact somebody has several of. A photograph's url does nicely. */
+  /**
+   * Set this for a fact somebody can have several of, and set it to something
+   * that names *which* one — a photograph's url, a GroupMe account's id. An
+   * empty slot means "they have one of these", and asserting a second one
+   * replaces the first.
+   */
   slot?: string;
   source: string;
+}
+
+/**
+ * A key is either one-of or several-of, per person and per source, and mixing
+ * the two is always a mistake rather than an intention.
+ *
+ * Without this check the mistake is silent and destructive: assert a second
+ * GroupMe id without a slot and the first stops being current, with nothing
+ * to say it ever was except the log nobody thought to read. Asking loudly is
+ * cheap; the alternative is losing an identity mapping that took a person an
+ * evening to work out.
+ */
+function guardSlotting(studentId: string, fact: Assertion) {
+  const slot = fact.slot ?? "";
+  const row = db()
+    .query<{ slot: string }, [string, string, string]>(
+      `SELECT slot FROM current_facts
+       WHERE student_id = ? AND key = ? AND source = ? LIMIT 1`,
+    )
+    .get(studentId, fact.key, fact.source);
+  if (!row) return;
+  if (!!row.slot === !!slot) return;
+  throw new Error(
+    slot
+      ? `"${fact.key}" is already held as a single value for this person and source; ` +
+          `retract it before giving it slots`
+      : `"${fact.key}" is already held in slots for this person and source; ` +
+          `pass a slot, or asserting this would quietly replace all of them`,
+  );
 }
 
 /**
@@ -85,6 +119,7 @@ export function assertFacts(studentId: string, facts: Assertion[], at = new Date
   );
   const write = db().transaction((rows: Assertion[]) => {
     for (const fact of rows) {
+      guardSlotting(studentId, fact);
       const { value, json } = encode(fact.value);
       insert.run(studentId, fact.key, fact.slot ?? "", value, json, fact.source, at);
     }
@@ -122,6 +157,35 @@ export function retractFact(
     )
     .run(studentId, key, slot, current.value, current.json, source, at);
   return true;
+}
+
+/**
+ * Tombstone every slot of a key at once.
+ *
+ * The one-slot version cannot express "this person's GroupMe accounts are all
+ * wrong", and doing it slot by slot means knowing the slots first, which a
+ * caller correcting a mistake usually does not.
+ */
+export function retractEvery(
+  studentId: string,
+  key: string,
+  source: string,
+  at = new Date().toISOString(),
+): number {
+  const rows = db()
+    .query<FactRow, [string, string, string]>(
+      `SELECT * FROM current_facts WHERE student_id = ? AND key = ? AND source = ?`,
+    )
+    .all(studentId, key, source);
+  const insert = db().query(
+    `INSERT INTO person_facts (student_id, key, slot, value, json, source, at, retracted)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+  );
+  const write = db().transaction(() => {
+    for (const row of rows) insert.run(studentId, key, row.slot, row.value, row.json, source, at);
+    return rows.length;
+  });
+  return write();
 }
 
 /** Everything currently asserted about one person. */
