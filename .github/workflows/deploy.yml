@@ -1,20 +1,8 @@
 name: Deploy
 
-# Push to main, and terebithia is running it a minute later.
-#
-# The heavy lifting is in taciturnaxolotl/dots, which every service here shares:
-# it joins the tailnet as tag:ci, opens a Tailscale SSH session as the service
-# user, fast-forwards ~/app, restarts the unit, and rolls the checkout back if
-# the health check does not come good.
-#
-# Nothing here needs an SSH key. Tailscale SSH is the authentication, and the
-# service user's right to restart itself is a sudo rule that mkService writes.
-
 on:
   push:
     branches: [main]
-    # A README change does not need a restart. Everything the running engine
-    # actually reads is below.
     paths:
       - "src/**"
       - "package.json"
@@ -26,8 +14,6 @@ permissions:
   contents: read
 
 jobs:
-  # The engine holds ten thousand people's rooms and phone numbers and has no
-  # staging copy, so the gate is here rather than after the fact.
   check:
     name: check
     runs-on: ubuntu-latest
@@ -45,16 +31,7 @@ jobs:
     with:
       service: cedarengine
       host: terebithia
-      # Tailnet-only, so this resolves and answers for the CI node and nobody
-      # else. `/health` is the one route that does not want the bearer token,
-      # and it counts rows, so a green check means the database came back too.
-      health_url: http://terebithia:3007/health
-      # The engine imports nothing but bun: and node: builtins — package.json
-      # has no `dependencies` at all, only biome and tsc for the check job
-      # above. So there is nothing to install on the server, and skipping it
-      # also steps around a real trap: nixpkgs ships bun 1.3.13, which cannot
-      # parse the lockfileVersion 2 `bun.lock` that bun 1.4 writes, and
-      # `--frozen-lockfile` turns that into a failed deploy rather than a warning.
+      health_url: https://cedarengine.dunkirk.sh/health
       install_command: "true"
     secrets:
       TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
