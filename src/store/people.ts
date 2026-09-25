@@ -216,6 +216,10 @@ export interface PeopleQuery {
   department?: string;
   type?: string;
   class?: string;
+  /** Facts that must be true of them: key to value. */
+  facts?: Record<string, string>;
+  /** Facts they must carry, whatever the value says. */
+  has?: string[];
   /** Include people the directory has stopped listing. Off by default. */
   includeGone?: boolean;
   limit?: number;
@@ -258,6 +262,25 @@ export function searchPeople(query: PeopleQuery): Person[] {
     if (!given) continue;
     where.push(`${column} LIKE ?`);
     args.push(given);
+  }
+
+  // Facts live in their own table, so this could be a join. EXISTS instead,
+  // for two reasons: the shared SELECT above names its columns unqualified, so
+  // a join risks an ambiguous `source` or `at` the moment either side grows a
+  // column; and a person with six photographs would arrive six times, which
+  // makes LIMIT mean something other than "people".
+  for (const [key, value] of Object.entries(query.facts ?? {})) {
+    where.push(
+      `EXISTS (SELECT 1 FROM current_facts f
+               WHERE f.student_id = people.id AND f.key = ? AND f.value = ?)`,
+    );
+    args.push(key, value);
+  }
+  for (const key of query.has ?? []) {
+    where.push(
+      `EXISTS (SELECT 1 FROM current_facts f WHERE f.student_id = people.id AND f.key = ?)`,
+    );
+    args.push(key);
   }
 
   const limit = Math.min(Math.max(query.limit ?? 25, 1), 500);

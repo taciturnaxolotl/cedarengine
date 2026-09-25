@@ -49,3 +49,12 @@ export function required(url: URL, name: string): string {
   if (!value) throw badRequest(`${name} is required`);
   return value;
 }
+
+/** A JSON request body, or a 400 that says so rather than a stack trace. */
+export const body = async <T>(request: Request): Promise<T> => {
+  try {
+    return (await request.json()) as T;
+  } catch {
+    throw badRequest("expected a JSON body");
+  }
+};

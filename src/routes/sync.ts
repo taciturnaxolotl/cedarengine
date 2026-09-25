@@ -14,20 +14,12 @@
 
 import { planBooklists, planDirectory } from "../collect/plan";
 import { db } from "../db";
-import { badRequest, json, q } from "../lib/http";
+import { badRequest, body, json, q } from "../lib/http";
 import { currentTerm } from "../lib/terms";
 import { ingestHarvest } from "../store/harvest";
 import { bumpSweep, finishSweep, lastSweep, startSweep } from "../store/history";
 import { retireUnseen, upsertPeople } from "../store/people";
-import type { RouteDef, RouteRequest } from "./types";
-
-const body = async <T>(request: RouteRequest): Promise<T> => {
-  try {
-    return (await request.json()) as T;
-  } catch {
-    throw badRequest("expected a JSON body");
-  }
-};
+import type { RouteDef } from "./types";
 
 interface StartBody {
   kind?: "directory" | "booklists";

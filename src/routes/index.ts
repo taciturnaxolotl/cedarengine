@@ -4,6 +4,7 @@ import { json } from "../lib/http";
 import { peopleStats } from "../store/people";
 import { campusRoutes } from "./campus";
 import { catalogRoutes } from "./catalog";
+import { factRoutes } from "./facts";
 import { historyRoutes } from "./history";
 import { majorRoutes } from "./majors";
 import { peopleRoutes } from "./people";
@@ -33,6 +34,7 @@ const healthRoute: RouteDef = {
 export const routes: RouteDef[] = [
   healthRoute,
   ...peopleRoutes,
+  ...factRoutes,
   ...catalogRoutes,
   ...majorRoutes,
   ...campusRoutes,

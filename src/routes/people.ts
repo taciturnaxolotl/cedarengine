@@ -21,22 +21,37 @@ export const peopleRoutes: RouteDef[] = [
       { name: "type", description: "Student type: UG, UGO, GS, P4" },
       { name: "class", description: "Class: FR, SO, JR, SR" },
       { name: "gone", description: "Include people the directory has stopped listing" },
+      {
+        name: "fact.*",
+        description: "Any fact, exactly: fact.16p.type=INTJ. See /v1/facts/keys for what exists.",
+      },
+      { name: "has", description: "A fact key they must carry, whatever it says. Repeatable." },
       { name: "limit", description: "1-500, default 25" },
       { name: "offset", description: "Rows to skip" },
     ],
-    handler: (_request, url) =>
-      json({
+    handler: (_request, url) => {
+      // `fact.` is a prefix rather than a fixed list because the whole point of
+      // the facts table is that nobody has to edit this file to add a key.
+      const facts: Record<string, string> = {};
+      for (const [name, value] of url.searchParams) {
+        if (name.startsWith("fact.") && value) facts[name.slice("fact.".length)] = value;
+      }
+
+      return json({
         people: searchPeople({
           q: q(url, "q"),
           dorm: q(url, "dorm"),
           department: q(url, "department"),
           type: q(url, "type"),
           class: q(url, "class"),
+          facts,
+          has: url.searchParams.getAll("has").filter(Boolean),
           includeGone: bool(url, "gone"),
           limit: num(url, "limit"),
           offset: num(url, "offset"),
         }),
-      }),
+      });
+    },
   },
   {
     method: "GET",

@@ -225,6 +225,58 @@ CREATE TABLE IF NOT EXISTS labels (
   at         TEXT NOT NULL
 ) STRICT;
 
+-- Anything anybody has asserted about a person that the directory does not
+-- carry: a GroupMe id, a 16personalities type, a photograph somebody took.
+--
+-- The directory sweep rewrites "people" on every run, so none of this can live
+-- there. It is keyed by student id and survives both a sweep and the person
+-- vanishing from it, which is the point: a graduate still had a GroupMe id.
+--
+-- Append-only, for the same reason person_events is. Every source here is a
+-- snapshot too — a personality test gets retaken, a photograph gets replaced,
+-- a hand-made identification turns out to have been the other Grace Anderson.
+-- The newest row for a (student_id, key, source, slot) is the truth and the
+-- rows behind it are how we got there. Nothing is deleted; "retracted" marks a
+-- tombstone, which also means a bad write is recoverable rather than fatal.
+--
+-- "value" is the scalar as plain text wherever it can be, and JSON only when
+-- the fact really is structured. That is what makes key = 'groupme.id' AND
+-- value = '12345' an index hit rather than a quoting puzzle, and it follows
+-- the rule the rest of this schema keeps: what is worth searching gets a
+-- column, not a json_extract at query time.
+CREATE TABLE IF NOT EXISTS person_facts (
+  seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id TEXT    NOT NULL,
+  key        TEXT    NOT NULL,
+  -- '' for a fact a person has one of. For a fact they have several of — a
+  -- photograph — whatever names this one, so a sixth photo is an append
+  -- rather than a read, a rewrite of the list, and a race with whoever else
+  -- was adding one.
+  slot       TEXT    NOT NULL DEFAULT '',
+  value      TEXT    NOT NULL,
+  json       INTEGER NOT NULL DEFAULT 0,
+  source     TEXT    NOT NULL,
+  at         TEXT    NOT NULL,
+  retracted  INTEGER NOT NULL DEFAULT 0
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS person_facts_person ON person_facts (student_id, key, seq);
+-- The reverse question, which is the one an outside system actually asks:
+-- given a GroupMe id, who is that?
+CREATE INDEX IF NOT EXISTS person_facts_lookup ON person_facts (key, value);
+
+-- The latest assertion of every fact, which is what nearly every read wants.
+-- Kept as a view so no caller has to remember that the table is a log.
+CREATE VIEW IF NOT EXISTS current_facts AS
+SELECT seq, student_id, key, slot, value, json, source, at
+FROM (
+  SELECT *, ROW_NUMBER() OVER (
+    PARTITION BY student_id, key, source, slot ORDER BY seq DESC
+  ) AS rn
+  FROM person_facts
+)
+WHERE rn = 1 AND retracted = 0;
+
 CREATE TABLE IF NOT EXISTS metrics (
   at       TEXT NOT NULL,
   source   TEXT NOT NULL,
