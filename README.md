@@ -53,9 +53,11 @@ bun run engine collect campus           # OpenStreetMap plus the campus tour
 bun run engine collect directory        # the whole directory (needs a session)
 ```
 
-The catalog, the book and the map need nobody's permission — Colleague's course
-search, the publisher's page HTML and Overpass are all public. The directory is
-different: it is behind SSO, so `collect directory` needs a session cookie, from
+The book and the map need nobody's permission: the publisher's page HTML and
+Overpass are both public. Colleague's course search used to be, but it now
+redirects signed-out visitors to SSO, so `collect catalog` fails without a
+session and the extension below is what keeps the catalog current. The
+directory is behind SSO too, so `collect directory` needs a session cookie, from
 `DIRECTORY_COOKIE`, from `--cookie <file>`, or from the signed macOS helper that
 `cedarstalk-raycast` already installs.
 
@@ -77,8 +79,10 @@ from the browser you are already signed into. Load it at
 URL and the bearer token into its popup and press Save.
 
 It does no thinking of its own. It asks `/v1/sync/manifest` what is missing,
-runs those directory queries and booklist fetches with your own cookies, and
-posts the results back. Which name prefixes are still hiding rows, which
+runs those directory queries, course searches and booklist fetches with your
+own cookies, and posts the results back. Each run crawls the current term and
+every term after it that Self-Service lists, so seat counts stay fresh through
+registration, plus the every-course listing once a week. Which name prefixes are still hiding rows, which
 students have no booklist yet, when a sweep has seen everybody — all of that
 stays on the server, so the extension never needs updating when the sweep logic
 gets smarter. It runs itself every twelve hours by default.

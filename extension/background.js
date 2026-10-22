@@ -1,10 +1,10 @@
 /**
  * The courier.
  *
- * Two of cedarengine's four sources are behind a login a server cannot hold:
- * the directory wants an SSO session, and the campus store wants an AWS WAF
- * challenge solved by a real browser. This is a real browser, and you are
- * already signed into both. So the extension does no thinking of its own — it
+ * Three of cedarengine's sources are behind a login a server cannot hold: the
+ * directory and the course search want an SSO session, and the campus store
+ * wants an AWS WAF challenge solved by a real browser. This is a real browser,
+ * and you are already signed into all of them. So the extension does no thinking of its own — it
  * asks the engine what to fetch, fetches it, and posts back what came out.
  *
  * The engine decides which name prefixes are still hiding rows, which students
@@ -25,6 +25,8 @@ const DEFAULTS = {
 
 const ALARM = "cedarengine-sync";
 const DIRECTORY = "https://selfservice.cedarville.edu";
+/** The registrar, not a load test. Never faster than this between pages. */
+const CATALOG_DELAY_MS = 300;
 const STORE_PAGE = "https://store.cedarville.edu/textbook/index/search";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -112,6 +114,117 @@ export async function syncDirectory({ refresh = false } = {}) {
     added,
     queued: 0,
   });
+}
+
+// ---- the catalog ---------------------------------------------------------
+
+/**
+ * Signed out, Self-Service bounces to its login page, which bounces again to
+ * the SAML provider. Either way the URL stops being a course search URL.
+ */
+const bounced = (response) =>
+  !response.url.startsWith(DIRECTORY) || response.url.includes("/Account/Login");
+
+/**
+ * Ellucian's antiforgery token, scraped from the search page. The cookie it
+ * is bound to lands in the browser's own jar, so only the token is kept here.
+ */
+async function courseSearchToken() {
+  const response = await fetch(`${DIRECTORY}/Student/Courses/Search`, {
+    credentials: "include",
+    headers: { accept: "text/html" },
+  });
+  if (bounced(response)) throw new SignedOut();
+  const html = await response.text();
+  const token = /name="__RequestVerificationToken"[^>]*value="([^"]+)"/.exec(html)?.[1];
+  if (!token) throw new Error("no antiforgery token on the course search page");
+  return token;
+}
+
+async function courseJson(token, path, body) {
+  const response = await fetch(DIRECTORY + path, {
+    method: body ? "POST" : "GET",
+    credentials: "include",
+    headers: {
+      accept: "application/json",
+      "x-requested-with": "XMLHttpRequest",
+      __RequestVerificationToken: token,
+      // Ellucian sends exactly this malformed content type; mirroring it.
+      ...(body ? { "content-type": "application/json, charset=UTF-8" } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (bounced(response)) throw new SignedOut();
+  const data = await response.json().catch(() => null);
+  if (!data) throw new Error(`${path} returned something other than JSON`);
+  return data;
+}
+
+/** Every page of one search, deduplicated by id as sections shift between pages. */
+async function everyPage(token, criteria, key, onPage) {
+  const byId = new Map();
+  for (let page = 1, total = 1; page <= total; page++) {
+    const result = await courseJson(token, "/Student/Courses/PostSearchCriteria", {
+      quantityPerPage: 100,
+      searchResultsView: "SectionListing",
+      ...criteria,
+      pageNumber: page,
+    });
+    total = Math.max(result.TotalPages ?? 1, 1);
+    for (const item of result[key] ?? [])
+      if (item?.Id && !byId.has(item.Id)) byId.set(item.Id, item);
+    await onPage?.(page, total);
+    if (page < total) await sleep(CATALOG_DELAY_MS);
+  }
+  return [...byId.values()];
+}
+
+export async function syncCatalog() {
+  await setStatus({ phase: "catalog", terms: 0, failed: [], catalogError: null });
+  const token = await courseSearchToken();
+  const vocabulary = await courseJson(token, "/Student/Courses/GetCatalogAdvancedSearch");
+  const listed = (vocabulary.Terms ?? []).map((term) => term.Item1);
+
+  const plan = await engine("/v1/sync/start", { kind: "catalog", listed });
+  const { sweep } = plan;
+  const wanted = [...(plan.terms ?? []), ...(plan.allCourses ? ["ALL"] : [])];
+  const filed = new Set();
+
+  const fetchOne = async (term) => {
+    const progress = (phase) => (page, pages) =>
+      setStatus({ phase: "catalog", term, page: `${phase} ${page}/${pages}` });
+    // The every-course listing has no sections, and no term to narrow it.
+    const all = term === "ALL";
+    const criteria = all ? {} : { terms: [term] };
+    const sections = all ? [] : await everyPage(token, criteria, "Sections", progress("sections"));
+    const courses = await everyPage(
+      token,
+      { ...criteria, searchResultsView: "CatalogListing" },
+      "CourseFullModels",
+      progress("courses"),
+    );
+    const posted = await engine("/v1/sync/catalog", { sweep, term, sections, courses });
+    if (!posted.kept) filed.add(term);
+  };
+
+  try {
+    for (const term of wanted) {
+      try {
+        await fetchOne(term);
+      } catch (error) {
+        // A signed-out session sinks everything; one bad term sinks only itself.
+        if (error instanceof SignedOut) throw error;
+      }
+    }
+  } finally {
+    // Close the sweep even when signed out partway, so it is not left dangling
+    // and claims nothing it did not fetch.
+    const failed = wanted.filter((term) => !filed.has(term));
+    await engine("/v1/sync/catalog", { sweep, done: true, failed });
+  }
+
+  const failed = wanted.filter((term) => !filed.has(term));
+  return setStatus({ phase: "idle", catalogAt: Date.now(), terms: filed.size, failed });
 }
 
 // ---- booklists -----------------------------------------------------------
@@ -253,8 +366,14 @@ export async function syncBooklists({ term } = {}) {
 
 export async function syncAll({ refresh = false } = {}) {
   try {
-    await setStatus({ phase: "directory", error: null });
+    await setStatus({ phase: "directory", error: null, catalogError: null });
     await syncDirectory({ refresh });
+    // The catalog failing is no reason to skip booklists, unless the session
+    // is gone, in which case nothing else would work either.
+    await syncCatalog().catch((error) => {
+      if (error instanceof SignedOut) throw error;
+      return setStatus({ catalogError: String(error.message ?? error) });
+    });
     await syncBooklists();
     return setStatus({ phase: "idle", error: null });
   } catch (error) {
@@ -270,6 +389,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
   const handlers = {
     sync: () => syncAll({ refresh: message.refresh }),
     directory: () => syncDirectory({ refresh: message.refresh }),
+    catalog: () => syncCatalog(),
     booklists: () => syncBooklists({ term: message.term }),
     manifest: () => engine("/v1/sync/manifest"),
     status: async () => (await chrome.storage.local.get("status")).status ?? {},

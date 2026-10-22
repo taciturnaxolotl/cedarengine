@@ -63,6 +63,9 @@ const run = (type) => async () => {
         result.error ? `error: ${result.error}` : "done",
         result.asked ? `${result.asked} directory queries` : "",
         result.added ? `${result.added} new people` : "",
+        result.terms ? `${result.terms} catalog terms` : "",
+        result.failed?.length ? `catalog failed: ${result.failed.join(" ")}` : "",
+        result.catalogError ? `catalog: ${result.catalogError}` : "",
         result.collected ? `${result.collected} booklists` : "",
       ]
         .filter(Boolean)
@@ -77,6 +80,7 @@ const run = (type) => async () => {
 el("save").onclick = save;
 el("sync").onclick = run("sync");
 el("directory").onclick = run("directory");
+el("catalog").onclick = run("catalog");
 el("booklists").onclick = run("booklists");
 
 try {

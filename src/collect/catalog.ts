@@ -8,7 +8,9 @@
  *
  * No session is involved: the guest course-search endpoints are what the
  * signed-out search page itself calls, and nothing personal is reachable from
- * them.
+ * them. As of October 2026 those endpoints redirect to SSO, so this crawler
+ * fails without a session; the extension runs the same searches signed in and
+ * hands the results to `fileCrawl`.
  */
 
 import { ALL_COURSES, replaceTerm, writeRule } from "../store/catalog";
@@ -73,12 +75,31 @@ export async function crawlTerm(
   });
 
   const courses = await crawlCourses(term, options, client);
+  return fileCrawl(term, sections, courses);
+}
 
-  // An empty crawl means something went wrong upstream; keeping the previous
-  // catalog beats replacing a working timetable with nothing.
+/**
+ * File one crawl, whoever fetched it: this crawler, or the extension doing the
+ * same search with a signed-in session.
+ *
+ * The every-course listing is deduplicated by code first. A term crawl that
+ * comes back with no sections means something went wrong upstream, and
+ * keeping the previous catalog beats replacing a working timetable with
+ * nothing.
+ */
+export function fileCrawl(
+  term: string,
+  sections: any[],
+  courses: any[],
+  fetchedAt = new Date().toISOString(),
+): { sections: number; courses: number } {
+  if (term === ALL_COURSES) {
+    const unique = dedupeByCode(courses);
+    if (unique.length) replaceTerm({ term, fetchedAt, sections: [], courses: unique });
+    return { sections: 0, courses: unique.length };
+  }
   if (!sections.length) return { sections: 0, courses: courses.length };
-
-  replaceTerm({ term, fetchedAt: new Date().toISOString(), sections, courses });
+  replaceTerm({ term, fetchedAt, sections, courses });
   return { sections: sections.length, courses: courses.length };
 }
 
@@ -119,15 +140,7 @@ export async function crawlAllCourses(
     return byId.size;
   });
 
-  const courses = dedupeByCode([...byId.values()]);
-  if (!courses.length) return 0;
-  replaceTerm({
-    term: ALL_COURSES,
-    fetchedAt: new Date().toISOString(),
-    sections: [],
-    courses,
-  });
-  return courses.length;
+  return fileCrawl(ALL_COURSES, [], [...byId.values()]).courses;
 }
 
 /**

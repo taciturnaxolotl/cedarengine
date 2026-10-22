@@ -9,6 +9,8 @@
  */
 
 import { db } from "../db";
+import { currentTerm } from "../lib/terms";
+import { ALL_COURSES, termStats } from "../store/catalog";
 
 export interface Query {
   last: string;
@@ -111,4 +113,35 @@ export function planBooklists(term: string, limit = 500, types = ["UG", "UGO", "
     )
     .all(...types, term);
   return { term, remaining: rows.length, ids: rows.slice(0, limit).map((r) => r.id) };
+}
+
+const SEASONS: Record<string, number> = { SP: 0, SU: 1, FA: 2 };
+
+/** A term code as a sortable number, or null for a suffix we do not know. */
+export function termOrder(code: string): number | null {
+  const match = /^(\d{4})(SP|SU|FA)$/.exec(code);
+  if (!match) return null;
+  return Number(match[1]) * 10 + SEASONS[match[2]!]!;
+}
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Which parts of the course catalog are worth fetching again.
+ *
+ * `listed` is whatever terms Self-Service offers right now. Past terms are
+ * frozen, so only this one and the ones ahead are crawled, every time, because
+ * seats move all through registration. The every-course listing only feeds
+ * the prerequisite graph and barely moves, so it waits a week. An unfamiliar
+ * term code is skipped rather than guessed at.
+ */
+export function planCatalog(listed: string[], now = new Date()) {
+  const floor = termOrder(currentTerm(now))!;
+  const terms = [...new Set(listed)]
+    .filter((code) => (termOrder(code) ?? -1) >= floor)
+    .sort((a, b) => termOrder(a)! - termOrder(b)!);
+
+  const held = termStats().find((t) => t.term === ALL_COURSES)?.fetchedAt;
+  const allCourses = !held || now.getTime() - Date.parse(held) >= WEEK_MS;
+  return { terms, allCourses };
 }
