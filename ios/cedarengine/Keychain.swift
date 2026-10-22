@@ -5,7 +5,7 @@ enum Keychain {
     private static var query: [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "sh.dunkirk.cedarsearch",
+            kSecAttrService as String: "sh.dunkirk.cedarengine",
             kSecAttrAccount as String: "bearer",
         ]
     }
