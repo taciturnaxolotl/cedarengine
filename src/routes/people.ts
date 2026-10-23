@@ -2,7 +2,7 @@
 
 import { bool, json, notFound, num, q } from "../lib/http";
 import { guessFor } from "../model/guess";
-import { scheduleFor } from "../model/schedule";
+import { scheduleFor, teachingFor } from "../model/schedule";
 import { locate } from "../store/campus";
 import { booklistTimeline, personTimeline } from "../store/history";
 import { peopleStats, personById, searchPeople } from "../store/people";
@@ -94,6 +94,23 @@ export const peopleRoutes: RouteDef[] = [
       const schedule = scheduleFor(request.params.id ?? "", q(url, "term"));
       if (!schedule) throw notFound("no booklist data for that person");
       return json(schedule);
+    },
+  },
+  {
+    method: "GET",
+    path: "/v1/people/:id/teaching",
+    tag: "people",
+    summary: "What a professor teaches: their sections by weekday, with times and rooms",
+    query: [
+      {
+        name: "term",
+        description: "Term code. Defaults to the current one, then the newest they taught.",
+      },
+    ],
+    handler: (request, url) => {
+      const teaching = teachingFor(request.params.id ?? "", q(url, "term"));
+      if (!teaching) throw notFound("no sections list that person as an instructor");
+      return json(teaching);
     },
   },
   {

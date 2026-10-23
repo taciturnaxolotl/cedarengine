@@ -22,6 +22,7 @@ struct Person: Codable, Identifiable, Hashable, Sendable {
     let studentType: String?
     let studentClass: String?
     let studentWorker: String?
+    let photoUrl: String?
     let present: Int?
     let firstSeen: String?
     let lastSeen: String?
@@ -42,7 +43,29 @@ struct Person: Codable, Identifiable, Hashable, Sendable {
         return nickname
     }
 
-    var isStudent: Bool { !(studentClass ?? "").isEmpty || !(dormName ?? "").isEmpty }
+    /// Faculty and staff carry a title or an office. The directory also hands
+    /// them a "GS" class and type, which means nothing about them.
+    var isEmployee: Bool { !(title ?? "").isEmpty || !(officeName ?? "").isEmpty }
+
+    var isStudent: Bool { !isEmployee && (!(studentClass ?? "").isEmpty || !(dormName ?? "").isEmpty) }
+
+    var isStudentWorker: Bool { ["true", "y", "yes"].contains((studentWorker ?? "").lowercased()) }
+
+    /// The directory's own photo, when it is a full URL anyone can load. Student
+    /// photos are relative links into the campus portal, which needs a login.
+    var directoryPhoto: Photo? {
+        guard let photoUrl, photoUrl.hasPrefix("http"), let url = URL(string: photoUrl) else { return nil }
+        return Photo(url: url, rotate: 0)
+    }
+
+    /// The number exactly as the directory lists it; short extensions are
+    /// left alone rather than guessed into a full number.
+    var phone: (display: String, url: URL)? {
+        guard let shown = officePhone?.trimmingCharacters(in: .whitespaces), !shown.isEmpty else { return nil }
+        let digits = shown.filter { $0.isNumber || $0 == "+" }
+        guard digits.count >= 7, let url = URL(string: "tel:\(digits)") else { return (shown, URL(string: "tel:")!) }
+        return (shown, url)
+    }
 
     var room: String? {
         let joined = [dormName, dormRoom].clean.joined(separator: " ")
@@ -319,6 +342,11 @@ struct API: Sendable {
     /// anyone the campus store never sold a book to.
     func schedule(for id: String, _ source: Source = .network) async throws -> Schedule? {
         try await optional("v1/people/\(id)/schedule", source)
+    }
+
+    /// Nil for anyone no section lists as an instructor.
+    func teaching(for id: String, _ source: Source = .network) async throws -> Schedule? {
+        try await optional("v1/people/\(id)/teaching", source)
     }
 
     func major(for id: String, _ source: Source = .network) async throws -> MajorGuess? {

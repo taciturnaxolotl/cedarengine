@@ -227,6 +227,41 @@ export function sectionsByName(term: string, names: string[]): SectionRow[] {
 }
 
 /**
+ * The LIKE is a cheap prefilter so SQLite only parses the payloads that could
+ * match; json_each is the real test, so "123" never matches "1234".
+ */
+const TAUGHT_BY = `payload LIKE ? AND EXISTS (
+  SELECT 1 FROM json_each(payload, '$.InstructorDetails') i
+  WHERE json_extract(i.value, '$.FacultyId') = ?)`;
+
+const taughtArgs = (facultyId: string): [string, string] => [`%${facultyId}%`, facultyId];
+
+/** Sections in a term whose instructors include this directory id. */
+export function sectionsTaughtBy(facultyId: string, term: string): SectionRow[] {
+  return db()
+    .query<SectionRow, string[]>(`${SECTION_SELECT} WHERE term = ? AND ${TAUGHT_BY} ORDER BY name`)
+    .all(term, ...taughtArgs(facultyId));
+}
+
+/** Terms with at least one such section, oldest first. */
+export function termsTaughtBy(facultyId: string): string[] {
+  return db()
+    .query<{ term: string }, string[]>(
+      `SELECT DISTINCT term FROM sections WHERE ${TAUGHT_BY} ORDER BY term`,
+    )
+    .all(...taughtArgs(facultyId))
+    .map((row) => row.term)
+    .sort(termOrder);
+}
+
+/** "2026FA" before "2027SP" before "2027SU": by year, then spring, summer, fall. */
+const termOrder = (a: string, b: string): number => {
+  const rank = (t: string) =>
+    Number(t.slice(0, 4)) * 10 + ({ SP: 1, SU: 2, FA: 3 }[t.slice(4)] ?? 0);
+  return rank(a) - rank(b);
+};
+
+/**
  * One course by code, preferring the term asked for and falling back to the
  * full-catalog copy. A requisite often names a course nobody is teaching this
  * year, and answering "no such course" for EGEE-2010 would be a lie.

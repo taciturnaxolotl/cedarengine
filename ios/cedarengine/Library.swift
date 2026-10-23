@@ -63,7 +63,7 @@ final class Library {
         }
     }
 
-    func photo(for person: Person) -> Photo? { photos[person.id] }
+    func photo(for person: Person) -> Photo? { photos[person.id] ?? person.directoryPhoto }
 
     /// The server's rules, run locally: two words are a first name (or
     /// nickname) and a last name; one word is a prefix of any name.

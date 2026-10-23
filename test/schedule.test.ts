@@ -161,3 +161,48 @@ describe("a student's week", () => {
     expect(schedule.sections).toEqual([]);
   });
 });
+
+describe("what a professor teaches", () => {
+  const instructors = (...ids: string[]) => ({
+    InstructorDetails: ids.map((id) => ({ FacultyId: id, FacultyName: `Dr. ${id}` })),
+  });
+
+  beforeEach(() => {
+    replaceTerm({
+      term: "2026FA",
+      fetchedAt: AT,
+      courses: [],
+      sections: [
+        section("MATH-1715-02", { Title: "Calculus II", ...instructors("1532283") }),
+        section("MATH-4450-01", {
+          Title: "Topology",
+          ...instructors("1532283", "999"),
+          FormattedMeetingTimes: [meeting([1, 3], "15:00", "16:15", "205")],
+        }),
+        section("MATH-1710-01", { Title: "Calculus I", ...instructors("15322830") }),
+      ],
+    });
+  });
+
+  test("finds sections by instructor id, including shared ones", async () => {
+    const { teachingFor } = await import("../src/model/schedule");
+    const t = teachingFor("1532283");
+    expect(t?.term).toBe("2026FA");
+    expect(t?.sections.map((s) => s.name)).toEqual(["MATH-1715-02", "MATH-4450-01"]);
+    expect(t?.week.find((d) => d.day === 1)?.blocks.map((b) => b.section)).toEqual([
+      "MATH-1715-02",
+      "MATH-4450-01",
+    ]);
+  });
+
+  test("an id that is a prefix of another does not match it", async () => {
+    const { teachingFor } = await import("../src/model/schedule");
+    expect(teachingFor("153228")).toBeNull();
+    expect(teachingFor("15322830")?.sections.map((s) => s.name)).toEqual(["MATH-1710-01"]);
+  });
+
+  test("nobody who teaches nothing", async () => {
+    const { teachingFor } = await import("../src/model/schedule");
+    expect(teachingFor("1")).toBeNull();
+  });
+});

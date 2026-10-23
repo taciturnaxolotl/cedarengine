@@ -15,7 +15,7 @@
  */
 
 import { currentTerm } from "../lib/terms";
-import { type SectionRow, sectionsByName } from "../store/catalog";
+import { type SectionRow, sectionsByName, sectionsTaughtBy, termsTaughtBy } from "../store/catalog";
 import { enrolmentOf } from "../store/harvest";
 import { personById } from "../store/people";
 
@@ -143,18 +143,8 @@ const creditsOf = (section: SectionRow): number | null => {
 const meetsInPerson = (meetings: Meeting[]): boolean =>
   meetings.some((meeting) => !meeting.online && meeting.days.length && meeting.start);
 
-export function scheduleFor(studentId: string, term?: string): Schedule | null {
-  const harvested = enrolmentOf(studentId);
-  if (!harvested.length) return null;
-
-  const wanted =
-    term ?? harvested.find((row) => row.term === currentTerm())?.term ?? harvested.at(-1)!.term;
-  const held = harvested.find((row) => row.term === wanted);
-  const person = personById(studentId);
-
-  const rows = held ? sectionsByName(wanted, held.sections) : [];
-  const found = new Set(rows.map((row) => (row.name ?? "").toUpperCase()));
-
+/** Sections laid out by weekday, each day's blocks in order. */
+function arrange(rows: SectionRow[]): { scheduled: ScheduledSection[]; week: Day[] } {
   const scheduled: ScheduledSection[] = rows.map((row) => ({
     name: row.name ?? "",
     code: row.code,
@@ -186,6 +176,23 @@ export function scheduleFor(studentId: string, term?: string): Schedule | null {
   }
   for (const day of week) day.blocks.sort((a, b) => a.start.localeCompare(b.start));
 
+  return { scheduled, week };
+}
+
+export function scheduleFor(studentId: string, term?: string): Schedule | null {
+  const harvested = enrolmentOf(studentId);
+  if (!harvested.length) return null;
+
+  const wanted =
+    term ?? harvested.find((row) => row.term === currentTerm())?.term ?? harvested.at(-1)!.term;
+  const held = harvested.find((row) => row.term === wanted);
+  const person = personById(studentId);
+
+  const rows = held ? sectionsByName(wanted, held.sections) : [];
+  const found = new Set(rows.map((row) => (row.name ?? "").toUpperCase()));
+
+  const { scheduled, week } = arrange(rows);
+
   return {
     studentId,
     name: person
@@ -201,5 +208,46 @@ export function scheduleFor(studentId: string, term?: string): Schedule | null {
     online: scheduled.filter((section) => !meetsInPerson(section.meetings)),
     unmatched: (held?.sections ?? []).filter((name) => !found.has(name.toUpperCase())),
     harvestedAt: held?.fetchedAt ?? null,
+  };
+}
+
+export interface Teaching {
+  facultyId: string;
+  name: string | null;
+  term: string;
+  /** Every term with at least one section this person teaches. */
+  terms: string[];
+  credits: number;
+  minutes: number;
+  sections: ScheduledSection[];
+  week: Day[];
+  online: ScheduledSection[];
+}
+
+/**
+ * What a professor teaches. Colleague names every instructor on a section by
+ * the same id the directory uses, so this is a lookup rather than a guess at
+ * matching "Dr. Nathan E. Averbeck" against a directory row.
+ */
+export function teachingFor(facultyId: string, term?: string): Teaching | null {
+  const terms = termsTaughtBy(facultyId);
+  if (!terms.length) return null;
+  const wanted = term ?? (terms.includes(currentTerm()) ? currentTerm() : terms.at(-1)!);
+  const rows = sectionsTaughtBy(facultyId, wanted);
+  const { scheduled, week } = arrange(rows);
+  const person = personById(facultyId);
+
+  return {
+    facultyId,
+    name: person
+      ? `${person.nickname ?? person.firstName ?? ""} ${person.lastName ?? ""}`.trim()
+      : null,
+    term: wanted,
+    terms,
+    credits: scheduled.reduce((total, section) => total + (section.credits ?? 0), 0),
+    minutes: week.reduce((total, day) => total + day.minutes, 0),
+    sections: scheduled.filter((section) => meetsInPerson(section.meetings)),
+    week: week.filter((day) => day.blocks.length),
+    online: scheduled.filter((section) => !meetsInPerson(section.meetings)),
   };
 }

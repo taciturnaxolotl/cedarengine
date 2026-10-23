@@ -5,6 +5,8 @@ struct PersonView: View {
     let library: Library
 
     @State private var schedule: Schedule?
+    @State private var teaching: Schedule?
+    @State private var teachingDay = 1
     @State private var major: MajorGuess?
     @State private var history: History?
     @State private var facts: [Fact] = []
@@ -32,11 +34,17 @@ struct PersonView: View {
         List {
             header
             info
-            if let schedule {
-                ScheduleSection(schedule: schedule, day: $day)
-                if !schedule.online.isEmpty { online(schedule.online) }
+            if let teaching {
+                ScheduleSection(title: "Teaching", schedule: teaching, day: $teachingDay)
+                courses(teaching)
             }
-            if let major, major.school != nil || !major.guesses.isEmpty { majorSection(major) }
+            if !person.isEmployee {
+                if let schedule {
+                    ScheduleSection(title: "Schedule", schedule: schedule, day: $day)
+                    if !schedule.online.isEmpty { online(schedule.online) }
+                }
+                if let major, major.school != nil || !major.guesses.isEmpty { majorSection(major) }
+            }
             other
             if photos.count > 1 { photoSection }
             if let history { HistorySection(history: history) }
@@ -96,22 +104,41 @@ struct PersonView: View {
         Section {
             Field("Full Name", person.fullName)
             Field("Room", person.room)
-            Field("Class", glossary.className(person.studentClass))
-            Field("Program", glossary.typeName(person.studentType))
+            if person.isStudent {
+                Field("Class", glossary.className(person.studentClass))
+                Field("Program", glossary.typeName(person.studentType))
+            }
             Field("Hometown", person.hometown)
             Field("Title", person.title)
             Field("Department", person.department)
             Field("Office", person.office)
-            if let phone = person.officePhone, !phone.isEmpty,
-               let url = URL(string: "tel:\(phone.filter { $0.isNumber || $0 == "+" })") {
-                LabeledContent("Phone") { Link(phone, destination: url) }
+            if let phone = person.phone {
+                if phone.url.absoluteString == "tel:" {
+                    Field("Extension", phone.display)
+                } else {
+                    LabeledContent("Phone") { Link(phone.display, destination: phone.url) }
+                }
             }
-            if let worker = person.studentWorker, !worker.isEmpty, worker.uppercased() != "N" {
-                Field("Student Worker", worker.uppercased() == "Y" ? "Yes" : worker)
-            }
+            if person.isStudentWorker { Field("Student Worker", "Yes") }
             Field("Username", person.username)
             if person.present == 0 {
                 LabeledContent("Status") { Text("Not Listed").foregroundStyle(.orange) }
+            }
+        }
+    }
+
+    // MARK: Courses
+
+    /// Every section they teach, so the ones with no meeting time still show.
+    private func courses(_ teaching: Schedule) -> some View {
+        Section("Courses") {
+            ForEach(teaching.sections + teaching.online) { section in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(section.title ?? section.name)
+                    Text(section.name + (teaching.online.contains { $0.id == section.id } ? " · Online" : ""))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -220,7 +247,9 @@ struct PersonView: View {
     private func fill(from source: Source) async {
         let api = library.api
         let id = person.id
-        async let schedule = Result { try await api.schedule(for: id, source) }
+        let employee = person.isEmployee
+        async let schedule = Result { employee ? nil : try await api.schedule(for: id, source) }
+        async let teaching = Result { try await api.teaching(for: id, source) }
         async let major = Result { try await api.major(for: id, source) }
         async let history = Result { try await api.history(for: id, source) }
         async let facts = Result { try await api.facts(for: id, source) }
@@ -228,6 +257,10 @@ struct PersonView: View {
         if case .success(let found) = await schedule {
             if let found, self.schedule == nil { day = ScheduleSection.startingDay(in: found) }
             self.schedule = found
+        }
+        if case .success(let found) = await teaching {
+            if let found, self.teaching == nil { teachingDay = ScheduleSection.startingDay(in: found) }
+            self.teaching = found
         }
         if case .success(let found) = await major { self.major = found }
         if case .success(let found) = await history { self.history = found }
@@ -255,6 +288,7 @@ struct Field: View {
 // MARK: - Schedule
 
 struct ScheduleSection: View {
+    let title: String
     let schedule: Schedule
     @Binding var day: Int
 
@@ -272,7 +306,7 @@ struct ScheduleSection: View {
         } header: {
             VStack(spacing: 10) {
                 HStack {
-                    Text("Schedule")
+                    Text(title)
                     Spacer()
                     Text(credits)
                 }
