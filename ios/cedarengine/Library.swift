@@ -14,9 +14,10 @@ final class Library {
     private(set) var syncedAt: Date?
 
     @ObservationIgnored private var index: [Entry] = []
+    private var byId: [String: Person] = [:]
     @ObservationIgnored private var loaded = false
 
-    nonisolated private static let directoryKey = "directory.json"
+    nonisolated private static let directoryKey = "directory-v2.json"
     private static let recentsKey = "recents"
     private static let syncedKey = "syncedAt"
     private static let recentLimit = 12
@@ -62,6 +63,10 @@ final class Library {
             Task.detached(priority: .utility) { Self.writeDirectory(people) }
         }
     }
+
+    /// The newest copy of somebody, so a page opened from an old cache or a
+    /// stale recent still picks up what the last refresh learned.
+    func current(_ person: Person) -> Person { byId[person.id] ?? person }
 
     func photo(for person: Person) -> Photo? { photos[person.id] ?? person.directoryPhoto }
 
@@ -110,7 +115,7 @@ final class Library {
     private func install(_ people: [Person]) {
         self.people = people
         index = people.map(Entry.init)
-        let byId = Dictionary(people.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        byId = Dictionary(people.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         recents = recents.map { byId[$0.id] ?? $0 }
     }
 

@@ -1,8 +1,16 @@
 import SwiftUI
 
 struct PersonView: View {
-    let person: Person
+    let initial: Person
     let library: Library
+
+    init(person: Person, library: Library) {
+        initial = person
+        self.library = library
+    }
+
+    @State private var fresh: Person?
+    private var person: Person { fresh ?? library.current(initial) }
 
     @State private var schedule: Schedule?
     @State private var teaching: Schedule?
@@ -82,6 +90,8 @@ struct PersonView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 24)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -93,7 +103,7 @@ struct PersonView: View {
     private var subtitle: String? {
         let parts: [String?] = person.isStudent
             ? [glossary.className(person.studentClass), person.room]
-            : [person.title, person.department]
+            : [person.title]
         let line = parts.clean.joined(separator: " · ")
         return line.isEmpty ? nil : line
     }
@@ -247,6 +257,7 @@ struct PersonView: View {
     private func fill(from source: Source) async {
         let api = library.api
         let id = person.id
+        if let found = try? await api.person(id, source) { fresh = found }
         let employee = person.isEmployee
         async let schedule = Result { employee ? nil : try await api.schedule(for: id, source) }
         async let teaching = Result { try await api.teaching(for: id, source) }

@@ -344,6 +344,10 @@ struct API: Sendable {
         try await optional("v1/people/\(id)/schedule", source)
     }
 
+    func person(_ id: String, _ source: Source = .network) async throws -> Person {
+        try await get("v1/people/\(id)", source: source)
+    }
+
     /// Nil for anyone no section lists as an instructor.
     func teaching(for id: String, _ source: Source = .network) async throws -> Schedule? {
         try await optional("v1/people/\(id)/teaching", source)
