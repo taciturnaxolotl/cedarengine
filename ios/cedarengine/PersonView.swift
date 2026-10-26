@@ -18,6 +18,7 @@ struct PersonView: View {
     @State private var major: MajorGuess?
     @State private var history: History?
     @State private var facts: [Fact] = []
+    @State private var roommates: Roommates = .none
     @State private var loaded = false
     @State private var day = 1
     @State private var viewing: Viewing?
@@ -42,6 +43,10 @@ struct PersonView: View {
         List {
             header
             info
+            if !roommates.roommates.isEmpty { peopleSection("Roommates", roommates.roommates) }
+            if !roommates.suitemates.isEmpty {
+                peopleSection(roommates.suite.map { "Suite \($0)" } ?? "Suitemates", roommates.suitemates)
+            }
             if let teaching {
                 ScheduleSection(title: "Teaching", schedule: teaching, day: $teachingDay)
                 courses(teaching)
@@ -133,6 +138,22 @@ struct PersonView: View {
             Field("Username", person.username)
             if person.present == 0 {
                 LabeledContent("Status") { Text("Not Listed").foregroundStyle(.orange) }
+            }
+        }
+    }
+
+    // MARK: Roommates
+
+    private func peopleSection(_ title: String, _ people: [Person]) -> some View {
+        Section {
+            ForEach(people) { mate in
+                NavigationLink(value: mate) { PersonRow(person: mate, library: library) }
+            }
+        } header: {
+            HStack {
+                Text(title)
+                Spacer()
+                Text("\(people.count)")
             }
         }
     }
@@ -264,6 +285,7 @@ struct PersonView: View {
         async let major = Result { try await api.major(for: id, source) }
         async let history = Result { try await api.history(for: id, source) }
         async let facts = Result { try await api.facts(for: id, source) }
+        async let roommates = Result { try await api.roommates(for: id, source) }
 
         if case .success(let found) = await schedule {
             if let found, self.schedule == nil { day = ScheduleSection.startingDay(in: found) }
@@ -276,6 +298,7 @@ struct PersonView: View {
         if case .success(let found) = await major { self.major = found }
         if case .success(let found) = await history { self.history = found }
         if case .success(let found) = await facts { self.facts = found }
+        if case .success(let found) = await roommates { self.roommates = found }
     }
 }
 

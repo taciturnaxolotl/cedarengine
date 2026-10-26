@@ -5,7 +5,7 @@ import { guessFor } from "../model/guess";
 import { scheduleFor, teachingFor } from "../model/schedule";
 import { locate } from "../store/campus";
 import { booklistTimeline, personTimeline } from "../store/history";
-import { peopleStats, personById, searchPeople } from "../store/people";
+import { peopleStats, personById, roommates, searchPeople } from "../store/people";
 import type { RouteDef } from "./types";
 
 export const peopleRoutes: RouteDef[] = [
@@ -137,6 +137,17 @@ export const peopleRoutes: RouteDef[] = [
       const where = locate(request.params.id ?? "");
       if (!where) throw notFound("no mapped building for that person");
       return json(where);
+    },
+  },
+  {
+    method: "GET",
+    path: "/v1/people/:id/roommates",
+    tag: "people",
+    summary: "Who the directory lists in the same room, and the same suite",
+    handler: (request) => {
+      const id = request.params.id ?? "";
+      if (!personById(id)) throw notFound("no such person");
+      return json(roommates(id));
     },
   },
   {

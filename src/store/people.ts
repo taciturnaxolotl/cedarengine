@@ -298,6 +298,75 @@ export function searchPeople(query: PeopleQuery): Person[] {
 export const personById = (id: string): Person | null =>
   db().query<Person, [string]>(`${SELECT} WHERE id = ?`).get(id);
 
+/**
+ * A suite from a room, where the hall has suites.
+ *
+ * The suite halls number a bedroom as the suite plus a letter — Lawlor's `02A`
+ * through `02D` are four bedrooms off suite `02` — and the College View
+ * apartments write it as `101-1`. A traditional hall's room ends in a digit and
+ * has no suite above it, so it is returned unchanged and is its own suite.
+ */
+export function suiteOf(room: string): string {
+  const apartment = room.match(/^(.+)-\d+$/);
+  if (apartment) return apartment[1] as string;
+  const bedroom = room.match(/^(.+)[A-Za-z]$/);
+  if (bedroom) return bedroom[1] as string;
+  return room;
+}
+
+export interface Roommates {
+  /** The person's own room and suite. `suite` is null when the hall has none. */
+  room: string | null;
+  suite: string | null;
+  /** Others in the exact same room. */
+  roommates: Person[];
+  /** Others in the same suite but a different room. Empty without suites. */
+  suitemates: Person[];
+}
+
+/**
+ * Who the directory lists living with somebody: the people in their room, and
+ * in a suite hall the rest of their suite.
+ *
+ * Empty for anyone without a room — staff, commuters, and the handful of
+ * students the directory gives a hall but no room number. A room number is only
+ * a room within one hall, so the hall has to match before anyone counts.
+ */
+export function roommates(id: string): Roommates {
+  const database = db();
+  const self = database
+    .query<{ dormName: string | null; dormRoom: string | null }, [string]>(
+      "SELECT dorm_name AS dormName, dorm_room AS dormRoom FROM people WHERE id = ?",
+    )
+    .get(id);
+
+  const none: Roommates = { room: null, suite: null, roommates: [], suitemates: [] };
+  if (!self?.dormName || !self?.dormRoom) return none;
+
+  const hall = database
+    .query<Person, [string, string]>(
+      `${SELECT} WHERE present = 1 AND dorm_name = ? AND dorm_room IS NOT NULL AND id <> ?
+       ORDER BY last_name, first_name`,
+    )
+    .all(self.dormName, id);
+
+  const suite = suiteOf(self.dormRoom);
+  const roommates: Person[] = [];
+  const suitemates: Person[] = [];
+  for (const person of hall) {
+    const room = person.dormRoom as string;
+    if (room === self.dormRoom) roommates.push(person);
+    else if (suiteOf(room) === suite) suitemates.push(person);
+  }
+
+  return {
+    room: self.dormRoom,
+    suite: suite === self.dormRoom ? null : suite,
+    roommates,
+    suitemates,
+  };
+}
+
 /** Name → id, the join the major model needs. Nicknames count as first names. */
 export function findByName(first: string, last: string): Person[] {
   return db()

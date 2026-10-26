@@ -87,6 +87,17 @@ struct Person: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// Who someone lives with: the people in their room, and in a suite hall the
+/// rest of their suite. `suite` is nil in a hall without suites.
+struct Roommates: Decodable, Sendable {
+    let room: String?
+    let suite: String?
+    let roommates: [Person]
+    let suitemates: [Person]
+
+    static let none = Roommates(room: nil, suite: nil, roommates: [], suitemates: [])
+}
+
 struct Glossary: Decodable, Sendable {
     let classes: [String: String]
     let types: [String: String]
@@ -346,6 +357,13 @@ struct API: Sendable {
 
     func person(_ id: String, _ source: Source = .network) async throws -> Person {
         try await get("v1/people/\(id)", source: source)
+    }
+
+    /// Who the directory lists living with somebody: the people in their room,
+    /// and in a suite hall the rest of their suite. Both empty for staff and
+    /// anyone without a room number.
+    func roommates(for id: String, _ source: Source = .network) async throws -> Roommates {
+        try await get("v1/people/\(id)/roommates", source: source)
     }
 
     /// Nil for anyone no section lists as an instructor.
