@@ -115,6 +115,33 @@ export function planBooklists(term: string, limit = 500, types = ["UG", "UGO", "
   return { term, remaining: rows.length, ids: rows.slice(0, limit).map((r) => r.id) };
 }
 
+/**
+ * Who needs their directory photo fetched.
+ *
+ * Only the students: faculty carry a public cedarville.edu image the app loads
+ * on its own. A student's photo is a relative campus-portal link, so the plan
+ * hands the courier the person id and that relative path to fetch signed in.
+ *
+ * Anyone with no photo comes first, then anyone whose photo has not been
+ * checked in `maxAgeDays` — re-fetched so a new headshot is noticed, while the
+ * hash keeps an unchanged one from being rewritten. So the sweep converges, and
+ * then drifts back over everyone slowly.
+ */
+export function planPhotos(limit = 500, maxAgeDays = 90) {
+  const cutoff = new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000).toISOString();
+  const rows = db()
+    .query<{ id: string; url: string }, [string]>(
+      `SELECT p.id AS id, p.photo_url AS url FROM people p
+       LEFT JOIN photos ph ON ph.student_id = p.id
+       WHERE p.present = 1
+         AND p.photo_url IS NOT NULL AND p.photo_url <> '' AND p.photo_url NOT LIKE 'http%'
+         AND (ph.student_id IS NULL OR ph.fetched_at < ?)
+       ORDER BY ph.fetched_at IS NOT NULL, p.last_name, p.first_name`,
+    )
+    .all(cutoff);
+  return { remaining: rows.length, ids: rows.slice(0, limit) };
+}
+
 const SEASONS: Record<string, number> = { SP: 0, SU: 1, FA: 2 };
 
 /** A term code as a sortable number, or null for a suffix we do not know. */

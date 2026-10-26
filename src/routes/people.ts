@@ -6,6 +6,7 @@ import { scheduleFor, teachingFor } from "../model/schedule";
 import { locate } from "../store/campus";
 import { booklistTimeline, personTimeline } from "../store/history";
 import { peopleStats, personById, roommates, searchPeople } from "../store/people";
+import { getPhoto } from "../store/photos";
 import type { RouteDef } from "./types";
 
 export const peopleRoutes: RouteDef[] = [
@@ -148,6 +149,30 @@ export const peopleRoutes: RouteDef[] = [
       const id = request.params.id ?? "";
       if (!personById(id)) throw notFound("no such person");
       return json(roommates(id));
+    },
+  },
+  {
+    method: "GET",
+    path: "/v1/people/:id/photo",
+    tag: "people",
+    summary: "The directory photo, as an image. Needs the extension to have fetched it",
+    queryAuth: true,
+    handler: (request) => {
+      const stored = getPhoto(request.params.id ?? "");
+      if (!stored) throw notFound("no photo for that person");
+      const etag = `"${stored.hash}"`;
+      if (request.headers.get("if-none-match") === etag) {
+        return new Response(null, { status: 304, headers: { etag } });
+      }
+      // Bun's Response takes a Uint8Array body; the DOM lib's BodyInit type
+      // does not list it, so the cast bridges the two.
+      return new Response(stored.bytes as unknown as BodyInit, {
+        headers: {
+          "content-type": stored.contentType,
+          "cache-control": "private, max-age=86400",
+          etag,
+        },
+      });
     },
   },
   {

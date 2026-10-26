@@ -22,11 +22,14 @@ const token = config.bearerToken;
 
 /**
  * Constant-time comparison, because a bearer check that leaks its own answer
- * through timing is decoration.
+ * through timing is decoration. The token rides in the `Authorization` header,
+ * or for a route that opts in, a `token` query parameter — the one way an
+ * `<img>` the browser loads can carry it.
  */
-function authorised(request: Request): boolean {
+function authorised(request: Request, route: RouteDef): boolean {
   const header = request.headers.get("authorization") ?? "";
-  const given = header.startsWith("Bearer ") ? header.slice(7) : header;
+  let given = header.startsWith("Bearer ") ? header.slice(7) : header;
+  if (!given && route.queryAuth) given = new URL(request.url).searchParams.get("token") ?? "";
   if (given.length !== token.length) return false;
   let diff = 0;
   for (let i = 0; i < given.length; i++) diff |= given.charCodeAt(i) ^ token.charCodeAt(i);
@@ -38,7 +41,7 @@ function wrap(route: RouteDef) {
     const started = performance.now();
     let status = 200;
     try {
-      if (!route.open && !authorised(request)) throw unauthorized();
+      if (!route.open && !authorised(request, route)) throw unauthorized();
       const response = await route.handler(request as RouteRequest, new URL(request.url));
       status = response.status;
       return response;

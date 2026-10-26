@@ -13,7 +13,7 @@
  */
 
 import { fileCrawl } from "../collect/catalog";
-import { planBooklists, planCatalog, planDirectory } from "../collect/plan";
+import { planBooklists, planCatalog, planDirectory, planPhotos } from "../collect/plan";
 import { db } from "../db";
 import { badRequest, body, json, q } from "../lib/http";
 import { currentTerm } from "../lib/terms";
@@ -21,10 +21,11 @@ import { ALL_COURSES } from "../store/catalog";
 import { ingestHarvest } from "../store/harvest";
 import { bumpSweep, finishSweep, lastSweep, startSweep } from "../store/history";
 import { retireUnseen, upsertPeople } from "../store/people";
+import { putPhoto } from "../store/photos";
 import type { RouteDef } from "./types";
 
 interface StartBody {
-  kind?: "directory" | "booklists" | "catalog";
+  kind?: "directory" | "booklists" | "catalog" | "photos";
   /** Sweep the whole name space again. Required before anyone can be retired. */
   refresh?: boolean;
   term?: string;
@@ -53,6 +54,11 @@ interface BooklistBody {
   sweep?: number;
   term?: string;
   rows?: { id: string | number; books?: any[] }[];
+}
+
+interface PhotoBody {
+  sweep?: number;
+  rows?: { id: string; contentType?: string; base64: string }[];
 }
 
 const sweepStartedAt = (id: number): string | null =>
@@ -103,6 +109,11 @@ export const syncRoutes: RouteDef[] = [
         const term = options.term ?? currentTerm();
         const sweep = startSweep("booklists", "extension", term);
         return json({ sweep, kind, ...planBooklists(term, options.limit ?? 500) });
+      }
+
+      if (kind === "photos") {
+        const sweep = startSweep("photos", "extension");
+        return json({ sweep, kind, ...planPhotos(options.limit ?? 200) });
       }
 
       // A fresh generation is the only thing that can prove somebody left, so
@@ -189,6 +200,36 @@ export const syncRoutes: RouteDef[] = [
         finishSweep(payload.sweep, { complete: true, note: term });
       }
       return json({ ...plan, ...tally, term, done: plan.remaining === 0 });
+    },
+  },
+  {
+    method: "POST",
+    path: "/v1/sync/photos",
+    tag: "sync",
+    summary: "Post fetched directory photos and get the next batch of ids",
+    body: '{ "sweep": 15, "rows": [{ "id": "1234567", "contentType": "image/jpeg", "base64": "..." }] }',
+    handler: async (request) => {
+      const payload = await body<PhotoBody>(request);
+      const rows = payload.rows ?? [];
+      if (!Array.isArray(rows))
+        throw badRequest("rows must be an array of { id, contentType, base64 }");
+
+      let stored = 0;
+      let unchanged = 0;
+      for (const row of rows) {
+        if (!row?.id || !row.base64) continue;
+        const bytes = Uint8Array.fromBase64(row.base64);
+        const result = putPhoto(row.id, row.contentType || "image/jpeg", bytes);
+        if (result === "stored") stored++;
+        else unchanged++;
+      }
+
+      if (payload.sweep)
+        bumpSweep(payload.sweep, { seen: rows.length, added: stored, changed: unchanged });
+
+      const plan = planPhotos(200);
+      if (payload.sweep && plan.remaining === 0) finishSweep(payload.sweep, { complete: true });
+      return json({ ...plan, stored, unchanged, done: plan.remaining === 0 });
     },
   },
   {

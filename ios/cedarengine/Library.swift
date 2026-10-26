@@ -68,7 +68,13 @@ final class Library {
     /// stale recent still picks up what the last refresh learned.
     func current(_ person: Person) -> Person { byId[person.id] ?? person }
 
-    func photo(for person: Person) -> Photo? { photos[person.id] ?? person.directoryPhoto }
+    /// Their photo: an asserted one first, then the directory's. Faculty carry a
+    /// public URL; a student's lives behind the campus login, so it comes from
+    /// the engine, which has it once the extension has fetched it.
+    func photo(for person: Person) -> Photo? {
+        if let known = photos[person.id] ?? person.directoryPhoto { return known }
+        return api.photoURL(for: person).map { Photo(url: $0, rotate: 0) }
+    }
 
     /// The server's rules, run locally: two words are a first name (or
     /// nickname) and a last name; one word is a prefix of any name.

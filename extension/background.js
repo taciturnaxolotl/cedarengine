@@ -478,6 +478,55 @@ export async function syncBooklists({ term } = {}) {
   return setStatus({ phase: "idle", booklistsAt: Date.now(), term: wanted, collected });
 }
 
+// ---- directory photos ----------------------------------------------------
+
+/**
+ * One student photo, fetched signed in. The directory lists it as a relative
+ * campus-portal link that needs the session, so this is the courier's job too.
+ * Returns the bytes base64-encoded, or null when there is no image to keep.
+ */
+async function fetchPhoto(url) {
+  const response = await fetch(DIRECTORY + url, { credentials: "include", redirect: "manual" });
+  if (response.type === "opaqueredirect" || response.redirected) throw new SignedOut();
+  if (!response.ok) return null;
+  const contentType = response.headers.get("content-type") ?? "image/jpeg";
+  if (!contentType.startsWith("image/")) return null;
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (!bytes.length) return null;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return { contentType, base64: btoa(binary) };
+}
+
+export async function syncPhotos() {
+  const { batch, delayMs } = await settings();
+  let plan = await engine("/v1/sync/start", { kind: "photos", limit: 500 });
+  const sweep = plan.sweep;
+  let stored = 0;
+
+  while (plan.ids?.length) {
+    const slice = plan.ids.slice(0, batch);
+    const rows = [];
+    for (const { id, url } of slice) {
+      const photo = await fetchPhoto(url);
+      if (photo) rows.push({ id: String(id), ...photo });
+      await setStatus({ phase: "photos", stored, queued: plan.remaining });
+      if (delayMs) await sleep(delayMs);
+    }
+
+    if (!rows.length) break; // nothing came back; stop rather than spin
+    const posted = await engine("/v1/sync/photos", { sweep, rows });
+    stored += posted.stored;
+    plan = posted;
+    await setStatus({ phase: "photos", note: null, stored, queued: posted.remaining });
+    if (posted.done) break;
+  }
+
+  return setStatus({ phase: "idle", photosAt: Date.now(), stored });
+}
+
 // ---- the loop ------------------------------------------------------------
 
 export async function syncAll({ refresh = false } = {}) {
@@ -496,6 +545,9 @@ export async function syncAll({ refresh = false } = {}) {
       return setStatus({ catalogError: String(error.message ?? error) });
     });
     await syncBooklists();
+    // Photos lean on the same Self-Service session, so they ride along at the
+    // end once the directory is known.
+    await syncPhotos();
     return setStatus({ phase: "idle", error: null });
   } catch (error) {
     if (error instanceof SignedOut) {
@@ -512,6 +564,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     directory: () => syncDirectory({ refresh: message.refresh }),
     catalog: () => syncCatalog(),
     booklists: () => syncBooklists({ term: message.term }),
+    photos: () => syncPhotos(),
     manifest: () => engine("/v1/sync/manifest"),
     status: async () => (await chrome.storage.local.get("status")).status ?? {},
   };

@@ -183,6 +183,21 @@ CREATE TABLE IF NOT EXISTS booklists (
 
 CREATE INDEX IF NOT EXISTS booklists_student ON booklists (student_id);
 
+-- The directory photo, as bytes.
+--
+-- Faculty carry a public cedarville.edu image anyone can load. A student's is a
+-- relative link into the campus portal that needs a session, so the courier
+-- fetches it signed in and hands over the bytes, and the engine serves them.
+-- One per person; the hash is the ETag and the way a re-sweep skips what has
+-- not changed.
+CREATE TABLE IF NOT EXISTS photos (
+  student_id   TEXT PRIMARY KEY,
+  content_type TEXT NOT NULL,
+  bytes        BLOB NOT NULL,
+  hash         TEXT NOT NULL,
+  fetched_at   TEXT NOT NULL
+) STRICT;
+
 -- A booklist that changes mid-term is a schedule change: a course added, one
 -- dropped. That is signal the merged fingerprint throws away, so the delta is
 -- kept even though the current list is what gets scored.

@@ -58,6 +58,13 @@ struct Person: Codable, Identifiable, Hashable, Sendable {
         return Photo(url: url, rotate: 0)
     }
 
+    /// True when the directory has a photo of them that lives behind the campus
+    /// login, which the engine serves once the extension has fetched it.
+    var hasPortalPhoto: Bool {
+        guard let photoUrl, !photoUrl.isEmpty else { return false }
+        return !photoUrl.hasPrefix("http")
+    }
+
     /// The number exactly as the directory lists it; short extensions are
     /// left alone rather than guessed into a full number.
     var phone: (display: String, url: URL)? {
@@ -304,6 +311,16 @@ struct API: Sendable {
     static let pageSize = 500
 
     let token: String
+
+    /// The engine's own photo for a person. `AsyncImage` cannot send a header,
+    /// so the token rides in the query; the engine takes it either way. Returns
+    /// nil for anyone the directory has no behind-the-login photo of.
+    func photoURL(for person: Person) -> URL? {
+        guard person.hasPortalPhoto else { return nil }
+        var components = URLComponents(url: Self.base.appending(path: "v1/people/\(person.id)/photo"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "token", value: token)]
+        return components.url
+    }
 
     func search(_ query: String, limit: Int = 50) async throws -> [Person] {
         struct Response: Decodable { let people: [Person] }

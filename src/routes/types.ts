@@ -27,5 +27,10 @@ export interface RouteDef {
   body?: string;
   /** Skips the bearer check. Only /health does. */
   open?: boolean;
+  /**
+   * Also accept the token from a `?token=` query parameter, for the one case a
+   * browser loads a URL with no chance to set a header: an `<img>` src.
+   */
+  queryAuth?: boolean;
   handler: (request: RouteRequest, url: URL) => Response | Promise<Response>;
 }
