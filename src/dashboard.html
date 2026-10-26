@@ -444,13 +444,16 @@
 
           <div class="two">
             <section><h2>population over time</h2>
-              <p class="note">directory rows appearing and vanishing, by month</p>
+              <p class="note">the standing headcount, month by month</p>
               ${lines(
-                stats.population.map((m) => ({ ...m, label: m.month })),
-                [
-                  { name: "arrived", of: (m) => m.appeared },
-                  { name: "left", of: (m) => m.vanished },
-                ],
+                (() => {
+                  let standing = 0;
+                  return stats.population.map((m) => {
+                    standing += m.appeared - m.vanished;
+                    return { label: m.month, standing };
+                  });
+                })(),
+                [{ name: "population", of: (m) => m.standing }],
               )}
             </section>
             <section><h2>requests here</h2>

@@ -32,8 +32,23 @@ export interface Sweep {
   note: string | null;
 }
 
-/** Open a sweep. The id it returns is what finishes it. */
+/**
+ * Open a sweep. The id it returns is what finishes it.
+ *
+ * A browser extension can wander off mid-sweep — the session dies, the tab
+ * closes, the token expires — and leave a sweep open forever. Rather than trust
+ * every client to close what it starts, a new sweep of a kind reaps any older
+ * one of that kind still running: whatever it was doing, it has been abandoned,
+ * and leaving it "running" only clutters the record and skews coverage.
+ */
 export function startSweep(kind: SweepKind, source: SweepSource, note?: string): number {
+  db()
+    .query(
+      `UPDATE sweeps SET finished_at = ?, complete = 0,
+         note = COALESCE(note || ' · ', '') || 'superseded'
+       WHERE kind = ? AND finished_at IS NULL`,
+    )
+    .run(new Date().toISOString(), kind);
   const row = db()
     .query<{ id: number }, [string, string, string, string | null]>(
       `INSERT INTO sweeps (kind, source, started_at, note) VALUES (?, ?, ?, ?) RETURNING id`,
