@@ -42,11 +42,15 @@ struct SearchView: View {
                         NavigationLink(value: person) { PersonRow(person: person, library: library) }
                     }
                 }
+                if trimmed.isEmpty, library.syncing || library.syncedAt != nil {
+                    status
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
             }
             .listStyle(.plain)
             .scrollDismissesKeyboard(.immediately)
             .overlay { placeholder }
-            .safeAreaInset(edge: .bottom) { status }
             .refreshable { await library.refresh() }
             .navigationTitle("People")
             .navigationDestination(for: Person.self) { PersonView(person: $0, library: library) }
@@ -92,21 +96,21 @@ struct SearchView: View {
         }
     }
 
+    /// The headcount, below the last row: seen only once you have scrolled the
+    /// whole list, not pinned over it.
     @ViewBuilder private var status: some View {
-        if trimmed.isEmpty, library.syncing || library.syncedAt != nil {
-            HStack(spacing: 6) {
-                if library.syncing {
-                    ProgressView().controlSize(.mini)
-                    Text("Updating…")
-                } else if let at = library.syncedAt {
-                    Text("\(library.people.count.formatted()) people · Updated \(at.formatted(.relative(presentation: .named)))")
-                }
+        HStack(spacing: 6) {
+            if library.syncing {
+                ProgressView().controlSize(.mini)
+                Text("Updating…")
+            } else if let at = library.syncedAt {
+                Text("\(library.people.count.formatted()) people · Updated \(at.formatted(.relative(presentation: .named)))")
             }
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
         }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
     }
 
     private func searchRemotely() async {
