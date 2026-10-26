@@ -483,16 +483,21 @@ export async function syncBooklists({ term } = {}) {
 /**
  * One student photo, fetched signed in. The directory lists it as a relative
  * campus-portal link that needs the session, so this is the courier's job too.
- * Returns the bytes base64-encoded, or null when there is no image to keep.
+ * Returns the image base64-encoded, "miss" when the portal has no photo for
+ * them, or null when the request itself failed and is worth another try later.
  */
 async function fetchPhoto(url) {
-  const response = await fetch(DIRECTORY + url, { credentials: "include", redirect: "manual" });
+  let response;
+  try {
+    response = await fetch(DIRECTORY + url, { credentials: "include", redirect: "manual" });
+  } catch {
+    return null; // network blip; leave them for the next run
+  }
   if (response.type === "opaqueredirect" || response.redirected) throw new SignedOut();
-  if (!response.ok) return null;
-  const contentType = response.headers.get("content-type") ?? "image/jpeg";
-  if (!contentType.startsWith("image/")) return null;
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!response.ok || !contentType.startsWith("image/")) return "miss";
   const bytes = new Uint8Array(await response.arrayBuffer());
-  if (!bytes.length) return null;
+  if (!bytes.length) return "miss";
   let binary = "";
   for (let i = 0; i < bytes.length; i += 0x8000) {
     binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
@@ -509,15 +514,19 @@ export async function syncPhotos() {
   while (plan.ids?.length) {
     const slice = plan.ids.slice(0, batch);
     const rows = [];
+    const missed = [];
     for (const { id, url } of slice) {
       const photo = await fetchPhoto(url);
-      if (photo) rows.push({ id: String(id), ...photo });
+      if (photo === "miss") missed.push(String(id));
+      else if (photo) rows.push({ id: String(id), ...photo });
       await setStatus({ phase: "photos", stored, queued: plan.remaining });
       if (delayMs) await sleep(delayMs);
     }
 
-    if (!rows.length) break; // nothing came back; stop rather than spin
-    const posted = await engine("/v1/sync/photos", { sweep, rows });
+    // Every id that resolved — a photo or a confirmed miss — is recorded, so
+    // the next plan moves past it. Only an all-blip batch makes no progress.
+    if (!rows.length && !missed.length) break;
+    const posted = await engine("/v1/sync/photos", { sweep, rows, missed });
     stored += posted.stored;
     plan = posted;
     await setStatus({ phase: "photos", note: null, stored, queued: posted.remaining });

@@ -52,14 +52,35 @@ export function putPhoto(
   return "stored";
 }
 
+/**
+ * Record that a person has no photo on file.
+ *
+ * The directory lists a photo link for people the portal then 404s. Without a
+ * row they stay "missing" and the sweep re-fetches them first every time,
+ * blocking everyone behind them. An empty row marks them checked, so they drop
+ * out until the staleness window brings them back around.
+ */
+export function markNoPhoto(id: string): void {
+  db()
+    .query(
+      `INSERT INTO photos (student_id, content_type, bytes, hash, fetched_at)
+       VALUES (?, '', ?, '', ?)
+       ON CONFLICT(student_id) DO UPDATE SET
+         content_type = '', bytes = excluded.bytes, hash = '', fetched_at = excluded.fetched_at`,
+    )
+    .run(id, new Uint8Array(0), new Date().toISOString());
+}
+
 export function getPhoto(id: string): StoredPhoto | null {
   const row = db()
     .query<{ content_type: string; bytes: Uint8Array; hash: string }, [string]>(
       "SELECT content_type, bytes, hash FROM photos WHERE student_id = ?",
     )
     .get(id);
-  return row ? { contentType: row.content_type, bytes: row.bytes, hash: row.hash } : null;
+  if (!row || row.bytes.length === 0) return null;
+  return { contentType: row.content_type, bytes: row.bytes, hash: row.hash };
 }
 
 export const photoCount = (): number =>
-  db().query<{ n: number }, []>("SELECT COUNT(*) AS n FROM photos").get()?.n ?? 0;
+  db().query<{ n: number }, []>("SELECT COUNT(*) AS n FROM photos WHERE length(bytes) > 0").get()
+    ?.n ?? 0;

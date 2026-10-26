@@ -21,7 +21,7 @@ import { ALL_COURSES } from "../store/catalog";
 import { ingestHarvest } from "../store/harvest";
 import { bumpSweep, finishSweep, lastSweep, startSweep } from "../store/history";
 import { retireUnseen, upsertPeople } from "../store/people";
-import { putPhoto } from "../store/photos";
+import { markNoPhoto, putPhoto } from "../store/photos";
 import type { RouteDef } from "./types";
 
 interface StartBody {
@@ -59,6 +59,8 @@ interface BooklistBody {
 interface PhotoBody {
   sweep?: number;
   rows?: { id: string; contentType?: string; base64: string }[];
+  /** Ids the courier tried but the portal had no photo for. */
+  missed?: string[];
 }
 
 const sweepStartedAt = (id: number): string | null =>
@@ -211,6 +213,7 @@ export const syncRoutes: RouteDef[] = [
     handler: async (request) => {
       const payload = await body<PhotoBody>(request);
       const rows = payload.rows ?? [];
+      const missed = payload.missed ?? [];
       if (!Array.isArray(rows))
         throw badRequest("rows must be an array of { id, contentType, base64 }");
 
@@ -223,13 +226,20 @@ export const syncRoutes: RouteDef[] = [
         if (result === "stored") stored++;
         else unchanged++;
       }
+      for (const id of missed) if (id) markNoPhoto(String(id));
 
-      if (payload.sweep)
-        bumpSweep(payload.sweep, { seen: rows.length, added: stored, changed: unchanged });
+      const seen = rows.length + missed.length;
+      if (payload.sweep) bumpSweep(payload.sweep, { seen, added: stored, changed: unchanged });
 
       const plan = planPhotos(200);
       if (payload.sweep && plan.remaining === 0) finishSweep(payload.sweep, { complete: true });
-      return json({ ...plan, stored, unchanged, done: plan.remaining === 0 });
+      return json({
+        ...plan,
+        stored,
+        unchanged,
+        missed: missed.length,
+        done: plan.remaining === 0,
+      });
     },
   },
   {
