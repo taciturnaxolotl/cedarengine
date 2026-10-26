@@ -25,6 +25,7 @@ const DEFAULTS = {
 
 const ALARM = "cedarengine-sync";
 const DIRECTORY = "https://selfservice.cedarville.edu";
+const DIRECTORY_PAGE = `${DIRECTORY}/CedarInfo/Directory`;
 /** The registrar, not a load test. Never faster than this between pages. */
 const CATALOG_DELAY_MS = 300;
 const STORE_PAGE = "https://store.cedarville.edu/textbook/index/search";
@@ -71,14 +72,60 @@ async function directoryQuery(last, first) {
 
   const response = await fetch(`${DIRECTORY}/CedarInfo/Directory/SearchResultsJson?${params}`, {
     credentials: "include",
+    // Signed out, Self-Service 302s to the Microsoft SSO page. Following that
+    // cross-origin redirect with these headers trips a CORS preflight that the
+    // SSO host does not answer, so the fetch throws instead of reporting the
+    // real problem. Stopping at the redirect keeps it a clean "signed out".
+    redirect: "manual",
     headers: { "x-requested-with": "XMLHttpRequest", accept: "*/*" },
   });
-  // Signed out, Self-Service answers with a login page rather than a 401.
-  if (!response.url.includes("selfservice.cedarville.edu")) throw new SignedOut();
+  if (response.type === "opaqueredirect" || response.redirected) throw new SignedOut();
   if (response.status === 401 || response.status === 403) throw new SignedOut();
   const data = await response.json().catch(() => null);
   if (!Array.isArray(data)) throw new SignedOut();
   return data;
+}
+
+/**
+ * A data-free check that the SSO session is live. The directory landing page is
+ * HTML behind the same login and returns 200 when signed in; a redirect off it
+ * means signed out. (The course-search page 302s even when authenticated, so it
+ * is no good as a probe.)
+ */
+async function selfServiceReady() {
+  try {
+    const response = await fetch(DIRECTORY_PAGE, {
+      credentials: "include",
+      redirect: "manual",
+      headers: { accept: "text/html" },
+    });
+    return response.ok && response.type !== "opaqueredirect" && !response.redirected;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Auth first. Self-Service needs an SSO session the server cannot hold, so make
+ * one is live before the sweep leans on it. If signed out, open the sign-in
+ * page and wait a few minutes for the person to finish rather than failing the
+ * whole run on the first query.
+ */
+async function ensureSelfService() {
+  if (await selfServiceReady()) return true;
+  await chrome.tabs.create({ url: DIRECTORY_PAGE, active: true });
+  for (let waited = 0; waited < 180_000; waited += 3000) {
+    await setStatus({
+      phase: "signin",
+      note: `waiting for sign-in · ${Math.round(waited / 1000)}s`,
+    });
+    await sleep(3000);
+    if (await selfServiceReady()) {
+      await setStatus({ phase: "directory", note: null });
+      return true;
+    }
+  }
+  return false;
 }
 
 export async function syncDirectory({ refresh = false } = {}) {
@@ -97,7 +144,7 @@ export async function syncDirectory({ refresh = false } = {}) {
         people: await directoryQuery(query.last, query.first),
       });
       asked++;
-      await setStatus({ phase: "directory", asked, added, queued: plan.pending });
+      await setStatus({ phase: "directory", note: null, asked, added, queued: plan.pending });
       if (delayMs) await sleep(delayMs);
     }
 
@@ -120,17 +167,23 @@ export async function syncDirectory({ refresh = false } = {}) {
 
 /**
  * Signed out, Self-Service bounces to its login page, which bounces again to
- * the SAML provider. Either way the URL stops being a course search URL.
+ * the SAML provider. Either way the URL stops being a course search URL. These
+ * pages follow their internal redirects rather than stopping at them, so the
+ * final URL is the signal — unlike the directory JSON endpoint, which answers
+ * straight and is read with redirect:"manual".
  */
 const bounced = (response) =>
   !response.url.startsWith(DIRECTORY) || response.url.includes("/Account/Login");
 
 /**
- * Ellucian's antiforgery token, scraped from the search page. The cookie it
- * is bound to lands in the browser's own jar, so only the token is kept here.
+ * Ellucian's antiforgery token, scraped from the search page. The cookie it is
+ * bound to lands in the browser's own jar, so only the token is kept here. This
+ * uses the authenticated /Student/Student/Courses/* area: the anonymous
+ * /Student/Courses/* catalog the server collector used is now gated, which is
+ * why collecting it moved into the signed-in browser.
  */
 async function courseSearchToken() {
-  const response = await fetch(`${DIRECTORY}/Student/Courses/Search`, {
+  const response = await fetch(`${DIRECTORY}/Student/Student/Courses/Search`, {
     credentials: "include",
     headers: { accept: "text/html" },
   });
@@ -164,7 +217,7 @@ async function courseJson(token, path, body) {
 async function everyPage(token, criteria, key, onPage) {
   const byId = new Map();
   for (let page = 1, total = 1; page <= total; page++) {
-    const result = await courseJson(token, "/Student/Courses/PostSearchCriteria", {
+    const result = await courseJson(token, "/Student/Student/Courses/PostSearchCriteria", {
       quantityPerPage: 100,
       searchResultsView: "SectionListing",
       ...criteria,
@@ -182,7 +235,7 @@ async function everyPage(token, criteria, key, onPage) {
 export async function syncCatalog() {
   await setStatus({ phase: "catalog", terms: 0, failed: [], catalogError: null });
   const token = await courseSearchToken();
-  const vocabulary = await courseJson(token, "/Student/Courses/GetCatalogAdvancedSearch");
+  const vocabulary = await courseJson(token, "/Student/Student/Courses/GetCatalogAdvancedSearch");
   const listed = (vocabulary.Terms ?? []).map((term) => term.Item1);
 
   const plan = await engine("/v1/sync/start", { kind: "catalog", listed });
@@ -232,10 +285,12 @@ export async function syncCatalog() {
 /**
  * Runs inside the store page.
  *
- * It has to: the booklist endpoint is guarded by an AWS WAF token that only
- * the page itself holds, and `AwsWafIntegration` lives in the page's own
- * world. Injecting into that world is the whole trick — no content script can
- * reach it from an isolated one.
+ * It has to: the booklist endpoint is guarded by an AWS WAF token that only a
+ * real request from the page's own origin carries. When the token dies mid-run
+ * the fetch comes back as a challenge page, so a run of those means the page
+ * needs re-solving — which only a reload can do. It hands that back to the
+ * service worker rather than trying to refresh the token itself; the token
+ * lives in the cookie jar now, not on any object this world can reach.
  */
 function harvestInPage(ids, delayMs) {
   const grab = (block, label) => {
@@ -260,21 +315,6 @@ function harvestInPage(ids, delayMs) {
     return books;
   };
 
-  const refreshToken = async () => {
-    try {
-      const waf = window.AwsWafIntegration;
-      if (waf?.getToken) {
-        await waf.getToken();
-        return true;
-      }
-      if (waf?.forceRefreshToken) {
-        await waf.forceRefreshToken();
-        return true;
-      }
-    } catch {}
-    return false;
-  };
-
   return (async () => {
     const rows = [];
     let consecutive = 0;
@@ -291,12 +331,9 @@ function harvestInPage(ids, delayMs) {
         rows.push({ id: String(id), books: parse(text) });
         consecutive = 0;
       } catch {
-        consecutive++;
-        if (consecutive >= 5) {
-          const recovered = await refreshToken();
-          if (!recovered) return { rows, challenged: true };
-          consecutive = 0;
-        }
+        // A short run of challenges means the token is dead. Hand what we have
+        // back so the worker can reload the page and re-solve before resuming.
+        if (++consecutive >= 5) return { rows, challenged: true };
       }
       if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
@@ -304,20 +341,75 @@ function harvestInPage(ids, delayMs) {
   })();
 }
 
-/** The store tab, opened once and reused. */
-async function storeTab() {
-  const [existing] = await chrome.tabs.query({ url: "https://store.cedarville.edu/*" });
-  if (existing) return existing;
-  const tab = await chrome.tabs.create({ url: STORE_PAGE, active: false });
+/** Resolve once a tab has finished loading, however it got there. */
+async function awaitComplete(tabId) {
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (tab?.status === "complete") return;
   await new Promise((resolve) => {
     const listener = (id, info) => {
-      if (id === tab.id && info.status === "complete") {
+      if (id === tabId && info.status === "complete") {
         chrome.tabs.onUpdated.removeListener(listener);
         resolve();
       }
     };
     chrome.tabs.onUpdated.addListener(listener);
   });
+}
+
+/**
+ * One cheap request the WAF also guards, carrying no personal data. A solved
+ * page answers with the book-list shell; the challenge answers with neither it
+ * nor a book-container. This is the only honest "is the page ready" signal:
+ * `complete` fires on the challenge interstitial too, and AwsWafIntegration is
+ * gone once the token lands in the cookie jar.
+ */
+function probeReadyInPage() {
+  return (async () => {
+    try {
+      const response = await fetch(`/textbook/index/books?student_id=0&_=${Date.now()}`, {
+        headers: { "x-requested-with": "XMLHttpRequest" },
+      });
+      const text = await response.text();
+      return text.includes("book-container") || text.includes("book-list-container");
+    } catch {
+      return false;
+    }
+  })();
+}
+
+/**
+ * The store sits behind an AWS WAF challenge. A freshly opened or token-expired
+ * tab reports "complete" on the challenge page itself, before the token cookie
+ * exists, so harvesting right away loses the whole first batch. Reload until a
+ * guarded probe actually comes back solved, or give up rather than spin.
+ */
+async function waitForStoreReady(tabId, tries = 6) {
+  for (let attempt = 1; attempt <= tries; attempt++) {
+    await awaitComplete(tabId);
+    const [probe] = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      func: probeReadyInPage,
+    });
+    if (probe?.result) return true;
+    await setStatus({ phase: "booklists", note: `warming store · ${attempt}/${tries}` });
+    if (attempt < tries) {
+      await chrome.tabs.reload(tabId);
+      await sleep(1500);
+    }
+  }
+  return false;
+}
+
+/** The store tab, opened once and reused, left on the search page. */
+async function storeTab() {
+  const [existing] = await chrome.tabs.query({ url: "https://store.cedarville.edu/*" });
+  if (existing) {
+    await awaitComplete(existing.id);
+    return existing;
+  }
+  const tab = await chrome.tabs.create({ url: STORE_PAGE, active: false });
+  await awaitComplete(tab.id);
   return tab;
 }
 
@@ -330,6 +422,18 @@ export async function syncBooklists({ term } = {}) {
   const sweep = plan.sweep;
   let collected = 0;
   let tab = await storeTab();
+
+  // Auth first: don't harvest until the WAF challenge is actually solved, or the
+  // whole opening batch is wasted against the interstitial.
+  if (!(await waitForStoreReady(tab.id))) {
+    return setStatus({
+      phase: "idle",
+      term: wanted,
+      collected,
+      error:
+        "the campus store would not clear its challenge — open it in a tab once, then sync again",
+    });
+  }
 
   while (plan.ids?.length) {
     const slice = plan.ids.slice(0, config.batch);
@@ -345,16 +449,28 @@ export async function syncBooklists({ term } = {}) {
       const posted = await engine("/v1/sync/booklists", { sweep, term: wanted, rows });
       collected += rows.length;
       plan = posted;
-      await setStatus({ phase: "booklists", term: wanted, collected, queued: posted.remaining });
+      await setStatus({
+        phase: "booklists",
+        note: null,
+        term: wanted,
+        collected,
+        queued: posted.remaining,
+      });
       if (posted.done) break;
     }
 
     if (challenged) {
-      // The token is dead. Reloading the page re-solves the challenge, which is
-      // exactly what the standalone harvester does every hundred requests.
-      await chrome.tabs.reload(tab.id);
-      await sleep(4000);
+      // The token died mid-sweep. Reload to re-solve, and wait for the page to
+      // actually come back before harvesting again rather than guessing at 4s.
       tab = await storeTab();
+      if (!(await waitForStoreReady(tab.id))) {
+        return setStatus({
+          phase: "idle",
+          term: wanted,
+          collected,
+          error: "the store stopped clearing its challenge mid-sweep",
+        });
+      }
     }
     if (!rows.length && !challenged) break; // nothing moving; stop rather than spin
   }
@@ -367,6 +483,11 @@ export async function syncBooklists({ term } = {}) {
 export async function syncAll({ refresh = false } = {}) {
   try {
     await setStatus({ phase: "directory", error: null, catalogError: null });
+    // Auth first: get the SSO session live before the directory and catalog
+    // lean on it, instead of failing the first query and recovering after.
+    if (!(await ensureSelfService())) {
+      return setStatus({ phase: "idle", error: "sign in to Self-Service, then sync again" });
+    }
     await syncDirectory({ refresh });
     // The catalog failing is no reason to skip booklists, unless the session
     // is gone, in which case nothing else would work either.
@@ -378,7 +499,7 @@ export async function syncAll({ refresh = false } = {}) {
     return setStatus({ phase: "idle", error: null });
   } catch (error) {
     if (error instanceof SignedOut) {
-      await chrome.tabs.create({ url: `${DIRECTORY}/CedarInfo/Directory`, active: true });
+      await chrome.tabs.create({ url: DIRECTORY_PAGE, active: true });
       return setStatus({ phase: "idle", error: "sign in to Self-Service, then sync again" });
     }
     return setStatus({ phase: "idle", error: String(error.message ?? error) });

@@ -5,7 +5,6 @@
  *
  *   bun run engine import                  seed from the older projects
  *   bun run engine collect directory       sweep the directory (needs a session)
- *   bun run engine collect catalog 2027SP  crawl a term (no session needed)
  *   bun run engine collect book            read the printed catalog
  *   bun run engine collect campus          fetch the map off OpenStreetMap
  *   bun run engine harvester 2027SP        write the booklist userscript
@@ -19,7 +18,6 @@
 import { writeFileSync } from "node:fs";
 import { crawlBook } from "./collect/book";
 import { collectCampus } from "./collect/campus";
-import { availableTerms, collectRule, crawlAllCourses, crawlTerm } from "./collect/catalog";
 import { sweepDirectory } from "./collect/directory";
 import { buildHarvester, ingestFile } from "./collect/harvest";
 import { importAll } from "./collect/import";
@@ -50,7 +48,6 @@ const ink = (code: string) => (text: string | number) =>
 const dim = ink("2");
 const bold = ink("1");
 const pink = ink("38;5;212");
-const blue = ink("38;5;75");
 const n = (value: number) => value.toLocaleString("en-US");
 
 const say = (label: string, value: string | number) =>
@@ -99,37 +96,6 @@ async function collect(what: string | undefined): Promise<void> {
       return;
     }
 
-    case "catalog": {
-      if (has("terms")) {
-        for (const term of await availableTerms()) console.log(`${term.code}\t${term.description}`);
-        return;
-      }
-      if (has("all")) {
-        const courses = await crawlAllCourses({
-          onProgress: (p) =>
-            progress(`${blue("every course")}  page ${p.page}/${p.pages}  ${n(p.items)}`),
-        });
-        endProgress();
-        say("courses", n(courses));
-        return;
-      }
-      // `collect` is dispatched with positional[1] as the thing to collect, so
-      // this case's own argument is the next one along. Reading positional[1]
-      // here crawls a term called "catalog", which finds nothing and reports
-      // success, and there is no way to ask for a term other than the current
-      // one because the fallback can never fire.
-      const term = positional[2] ?? currentTerm();
-      const result = await crawlTerm(term, {
-        onProgress: (p) =>
-          progress(`${blue(term)} ${p.phase}  page ${p.page}/${p.pages}  ${n(p.items)}`),
-      });
-      endProgress();
-      say("term", term);
-      say("sections", n(result.sections));
-      say("courses", n(result.courses));
-      return;
-    }
-
     case "book": {
       const year = positional[2] ?? catalogYear();
       const book = await crawlBook(year, {
@@ -158,19 +124,13 @@ async function collect(what: string | undefined): Promise<void> {
     }
 
     case "rule": {
-      const [, requirement, subrequirement, group] = positional;
-      if (!requirement || !subrequirement || !group) {
-        console.error("usage: engine collect rule <requirement> <subrequirement> <group>");
-        process.exit(1);
-      }
-      const courses = await collectRule({ requirement, subrequirement, group });
-      say("courses", n(courses.length));
-      console.log(courses.join("\n"));
+      console.error("the catalog moved into the browser extension; collect it there");
+      process.exit(1);
       return;
     }
 
     default:
-      console.error("collect what? directory | catalog | book | campus | rule");
+      console.error("collect what? directory | book | campus");
       process.exit(1);
   }
 }

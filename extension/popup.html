@@ -53,12 +53,45 @@
         min-height: 3.2em;
       }
       .err { color: var(--pink); }
+      .phase {
+        display: inline-block;
+        margin-left: 8px;
+        font-size: 10px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--dim);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 1px 7px;
+        vertical-align: middle;
+      }
+      .phase:empty { display: none; }
+      .phase.live {
+        color: #14120f;
+        background: var(--pink);
+        border-color: var(--pink);
+      }
+      .bar {
+        display: none;
+        height: 4px;
+        background: var(--line);
+        border-radius: 999px;
+        margin-top: 12px;
+        overflow: hidden;
+      }
+      .bar > i {
+        display: block;
+        height: 100%;
+        width: 0;
+        background: var(--pink);
+        transition: width 0.3s ease;
+      }
       .check { display: flex; gap: 6px; align-items: center; margin-top: 10px; color: var(--dim); }
       .check input { width: auto; }
     </style>
   </head>
   <body>
-    <h1>cedar<span>engine</span> sync</h1>
+    <h1>cedar<span>engine</span> sync<span class="phase" id="phase"></span></h1>
     <p class="sub">fetches what only your browser can reach</p>
 
     <label>engine url<input id="engine" placeholder="http://127.0.0.1:3000" /></label>
@@ -79,6 +112,7 @@
       <button id="booklists" type="button" class="ghost">Booklists only</button>
     </div>
 
+    <div class="bar" id="bar"><i></i></div>
     <div class="status" id="status">—</div>
     <script src="popup.js" type="module"></script>
   </body>
