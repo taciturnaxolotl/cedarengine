@@ -232,22 +232,19 @@ export interface PeopleQuery {
  * `q` is matched as a prefix against first, last, nickname and username, and
  * a two-word `q` is read as "first last" — which is how people actually type a
  * name, and the only reason searching "kieran klukas" beats searching "kieran".
+ * Words match inside names too, so "peter etten" finds Peter Van Etten.
  */
 export function searchPeople(query: PeopleQuery): Person[] {
   const where: string[] = [];
   if (!query.includeGone) where.push("present = 1");
   const args: (string | number)[] = [];
 
-  const words = (query.q ?? "").trim().split(/\s+/).filter(Boolean);
-  if (words.length >= 2) {
-    const first = `${words[0]}%`;
-    const last = `${words[words.length - 1]}%`;
-    where.push("((first_name LIKE ? OR nickname LIKE ?) AND last_name LIKE ?)");
-    args.push(first, first, last);
-  } else if (words.length === 1) {
-    const like = `${words[0]}%`;
-    where.push("(first_name LIKE ? OR last_name LIKE ? OR nickname LIKE ? OR username LIKE ?)");
-    args.push(like, like, like, like);
+  const typed = (query.q ?? "").trim().replace(/\s+/g, " ");
+  const words = typed.split(/[\s-]+/).filter(Boolean);
+  if (words.length) {
+    const each = words.map((_, i) => `${nameWords(namesFor(i, words.length))} LIKE ?`);
+    where.push(`((${each.join(" AND ")}) OR last_name LIKE ?)`);
+    args.push(...words.map((word) => `% ${word}%`), `${typed}%`);
   }
 
   const exact: [string, string | undefined][] = [
@@ -294,6 +291,21 @@ export function searchPeople(query: PeopleQuery): Person[] {
     .query<Person, any[]>(sql)
     .all(...args, limit, offset);
 }
+
+const GIVEN = ["first_name", "nickname"];
+const FAMILY = ["last_name"];
+
+/** Which names the i-th of n query words may start: first given, last family, between either. */
+function namesFor(i: number, n: number): string[] {
+  if (n === 1) return [...GIVEN, ...FAMILY, "username"];
+  if (i === 0) return GIVEN;
+  if (i === n - 1) return FAMILY;
+  return [...GIVEN, ...FAMILY];
+}
+
+/** The columns as space-led words, so `LIKE '% w%'` means "a word starts with w". */
+const nameWords = (columns: string[]) =>
+  `(' ' || replace(${columns.map((c) => `coalesce(${c}, '')`).join(" || ' ' || ")}, '-', ' '))`;
 
 export const personById = (id: string): Person | null =>
   db().query<Person, [string]>(`${SELECT} WHERE id = ?`).get(id);

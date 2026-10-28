@@ -76,23 +76,21 @@ final class Library {
         return api.photoURL(for: person).map { Photo(url: $0, rotate: 0) }
     }
 
-    /// The server's rules, run locally: two words are a first name (or
-    /// nickname) and a last name; one word is a prefix of any name.
+    /// The server's rules, run locally: the first word starts a given name, the
+    /// last a family name, any between either; or the whole query is a last name.
     func search(_ query: String, limit: Int = 100) -> [Person] {
-        let words = Entry.fold(query).split(whereSeparator: \.isWhitespace).map(String.init)
-        guard let first = words.first else { return [] }
+        let folded = Entry.fold(query)
+        let words = folded.split(whereSeparator: { $0.isWhitespace || $0 == "-" }).map(String.init)
+        guard !words.isEmpty else { return [] }
+        let whole = folded.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         var out: [Person] = []
-        if words.count >= 2, let last = words.last {
-            for entry in index where (entry.first.hasPrefix(first) || entry.nick.hasPrefix(first)) && entry.last.hasPrefix(last) {
-                out.append(entry.person)
-                if out.count == limit { break }
+        for entry in index {
+            let ordered = words.indices.allSatisfy { i in
+                entry.names(for: i, of: words.count).contains { $0.hasPrefix(words[i]) }
             }
-        } else {
-            for entry in index where entry.first.hasPrefix(first) || entry.last.hasPrefix(first)
-                || entry.nick.hasPrefix(first) || entry.user.hasPrefix(first) {
-                out.append(entry.person)
-                if out.count == limit { break }
-            }
+            guard ordered || entry.last.hasPrefix(whole) else { continue }
+            out.append(entry.person)
+            if out.count == limit { break }
         }
         return out
     }
@@ -149,17 +147,29 @@ final class Library {
 
     private struct Entry {
         let person: Person
-        let first: String
         let last: String
-        let nick: String
+        let given: [String]
+        let family: [String]
         let user: String
 
         init(_ person: Person) {
             self.person = person
-            first = Self.fold(person.firstName ?? "")
             last = Self.fold(person.lastName ?? "")
-            nick = Self.fold(person.nickname ?? "")
+            given = Self.words(person.firstName, person.nickname)
+            family = Self.words(person.lastName)
             user = Self.fold(person.username ?? "")
+        }
+
+        /// Which name words the i-th of n query words may start, as on the server.
+        func names(for i: Int, of n: Int) -> [String] {
+            if n == 1 { return given + family + [user] }
+            if i == 0 { return given }
+            if i == n - 1 { return family }
+            return given + family
+        }
+
+        static func words(_ names: String?...) -> [String] {
+            names.flatMap { fold($0 ?? "").split(whereSeparator: { $0 == " " || $0 == "-" }).map(String.init) }
         }
 
         static func fold(_ s: String) -> String {
