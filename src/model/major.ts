@@ -12,6 +12,7 @@
  * metrics table exists to watch that climb.
  */
 
+import { EDITIONS, type Edition } from "../collect/book";
 import { latestYear, programVocabulary } from "../store/programs";
 
 export interface Guess {
@@ -40,8 +41,8 @@ const cleanTitle = (title: string) =>
     .replace(/\b(\w+)\s+\1\b/gi, "$1")
     .trim();
 
-export function buildModel(year: string): MajorModel {
-  const programs = programVocabulary(year);
+/** One edition's programs as IDF-weighted vectors, and the ranking against them. */
+function scorer(programs: { title: string; courses: string[] }[]) {
   const count = programs.length;
 
   const df = new Map<string, number>();
@@ -60,13 +61,17 @@ export function buildModel(year: string): MajorModel {
     };
   });
 
-  const guess = (courses: Iterable<string>): Ranking => {
+  return (courses: Iterable<string>): Ranking => {
     const student = new Map<string, number>();
     for (const course of courses) student.set(course, idf(course));
     const norm = Math.hypot(...student.values());
     const signal = [...student.keys()].filter((c) => df.has(c) && idf(c) > SIGNAL_IDF).length;
     if (!norm) return { ranked: [], signal: 0 };
 
+    // A program sharing no course with the booklist scores zero, and a list of
+    // zeros sorts into catalog order, which reads as a guess and is not one.
+    // A booklist of courses the book never lists would otherwise be handed
+    // whatever program happened to be printed first.
     const ranked = vectors
       .map((program) => {
         if (!program.norm) return { title: program.title, score: 0 };
@@ -77,12 +82,48 @@ export function buildModel(year: string): MajorModel {
         }
         return { title: program.title, score: dot / (norm * program.norm) };
       })
+      .filter((program) => program.score > 0)
       .sort((a, b) => b.score - a.score);
 
     return { ranked, signal };
   };
+}
 
-  return { year, programCount: count, guess };
+/** Cedarville numbers graduate courses from 5000 up: BTAT-6410, NSG-8010. */
+const GRADUATE_LEVEL = /-[5-9]\d{3}[A-Z]?$/;
+
+/**
+ * Which book a booklist should be read against.
+ *
+ * Mostly graduate-level courses mean a graduate student, whatever the directory
+ * calls them. The two books are scored separately rather than pooled because
+ * pooling changes the weights: forty extra programs shift every course's
+ * rarity, and undergraduates who never touch a graduate course get reranked by
+ * programs they cannot be in.
+ */
+export function editionFor(courses: Iterable<string>): Edition {
+  const codes = [...courses];
+  const graduate = codes.filter((code) => GRADUATE_LEVEL.test(code)).length;
+  return graduate * 2 > codes.length ? "graduate" : "undergraduate";
+}
+
+export function buildModel(year: string): MajorModel {
+  const programs = programVocabulary(year);
+  const books = new Map<Edition, ReturnType<typeof scorer>>();
+  for (const edition of EDITIONS) {
+    const shelf = programs.filter((p) => p.edition === edition);
+    if (shelf.length) books.set(edition, scorer(shelf));
+  }
+
+  const guess = (courses: Iterable<string>): Ranking => {
+    const codes = [...courses];
+    // A year collected before the graduate book existed still answers, from
+    // the undergraduate one, rather than answering nothing.
+    const book = books.get(editionFor(codes)) ?? books.get("undergraduate");
+    return book ? book(codes) : { ranked: [], signal: 0 };
+  };
+
+  return { year, programCount: programs.length, guess };
 }
 
 let cached: MajorModel | undefined;

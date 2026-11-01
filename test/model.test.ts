@@ -59,9 +59,14 @@ describe("the major model", () => {
     expect(buildModel("2026-2027").guess([]).ranked).toEqual([]);
   });
 
-  test("courses the catalog has never heard of do not crash it", () => {
+  test("courses the catalog has never heard of rank nothing rather than catalog order", () => {
     const { ranked } = buildModel("2026-2027").guess(["ZZZZ-9999"]);
-    expect(ranked).toHaveLength(3);
+    expect(ranked).toEqual([]);
+  });
+
+  test("programs sharing nothing with the booklist are left out", () => {
+    const { ranked } = buildModel("2026-2027").guess(["EGEE-3010"]);
+    expect(ranked.map((g) => g.title)).toEqual(["Electrical Engineering"]);
   });
 });
 

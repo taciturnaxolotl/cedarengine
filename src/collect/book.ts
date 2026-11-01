@@ -52,7 +52,20 @@ export interface ProgramPage {
   sequence: SequenceYear[];
   /** Every course code named anywhere on the page. Used to match programs. */
   courses: string[];
+  /**
+   * The school the book files the program under. Only the graduate edition
+   * says so in a form worth reading; the undergraduate pages leave it unset.
+   */
+  school?: string;
 }
+
+/**
+ * Cedarville prints two catalogs a year. The undergraduate one is the book the
+ * rest of this file was written against; the graduate one shares its
+ * publisher and page format but none of its layout conventions.
+ */
+export type Edition = "undergraduate" | "graduate";
+export const EDITIONS: Edition[] = ["undergraduate", "graduate"];
 
 const COURSE = /\b[A-Z]{2,5}-\d{4}[A-Z]?\b/g;
 /** Four or more dot leaders, then a number, optionally a range. */
@@ -340,6 +353,7 @@ export interface BookOptions {
 
 export interface Book {
   year: CatalogYear;
+  edition: Edition;
   pages: number;
   programs: ProgramPage[];
   fetchedAt: string;
@@ -348,7 +362,15 @@ export interface Book {
 const BASE = "https://publications.cedarville.edu/academiccatalogs";
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export const pageUrl = (year: CatalogYear, page: number) => `${BASE}/${year}/${page}/`;
+/** The graduate book sits one directory down from the undergraduate one. */
+const bookUrl = (year: CatalogYear, edition: Edition) =>
+  `${BASE}/${edition === "graduate" ? "graduate/" : ""}${year}`;
+
+export const pageUrl = (year: CatalogYear, page: number, edition: Edition = "undergraduate") =>
+  `${bookUrl(year, edition)}/${page}/`;
+
+export const tocUrl = (year: CatalogYear, edition: Edition = "undergraduate") =>
+  `${bookUrl(year, edition)}/toc/`;
 
 /**
  * Strip a page to its text.
@@ -381,16 +403,189 @@ export function textOf(html: string): string {
 export async function pageCount(
   year: CatalogYear,
   get: typeof globalThis.fetch = fetch,
+  edition: Edition = "undergraduate",
 ): Promise<number> {
-  const html = await (await get(pageUrl(year, 1))).text();
+  const html = await (await get(pageUrl(year, 1, edition))).text();
   const refs = [...html.matchAll(/href="\.\.\/(\d+)\/"/g)].map((m) => Number(m[1]));
   const most = Math.max(0, ...refs);
-  if (!most) throw new Error(`no page navigation found for catalog ${year}`);
+  if (!most) throw new Error(`no page navigation found for the ${edition} catalog ${year}`);
   return most;
 }
 
-/** Read a whole catalog year, keeping only the pages that describe a program. */
-export async function crawlBook(year: CatalogYear, options: BookOptions = {}): Promise<Book> {
+// ---- the graduate edition --------------------------------------------------
+
+export interface TocEntry {
+  page: number;
+  title: string;
+}
+
+/** Every heading in FlippingBook's table of contents, in book order. */
+export function parseToc(html: string): TocEntry[] {
+  return [...html.matchAll(/<a[^>]*href="\.\.\/(\d+)\/"[^>]*>([^<]*)<\/a>/g)]
+    .map((m) => ({
+      page: Number(m[1]),
+      title: textOf(m[2] ?? "")
+        .replace(/\s+/g, " ")
+        .trim(),
+    }))
+    .filter((entry) => entry.title && !/^\d+$/.test(entry.title));
+}
+
+/**
+ * A heading that opens a degree or certificate.
+ *
+ * The contents are flat: "Master of Divinity" and its "Program Delivery" sit at
+ * the same level, so programs are recognised by how they are named. Combined
+ * degrees are announced by their requirements heading, since that is the only
+ * entry that names both halves.
+ */
+const PROGRAM =
+  /^(?:(?:Accelerated |Advanced )?(?:Master|Doctor)|Graduate Certificate|MSN\b)|Combined Degree Course Requirements$/;
+/** Named like a program, but an overview of the ones that follow it. */
+const NOT_PROGRAM = /Pathways$/;
+/** A heading that ends whatever program came before it without starting one. */
+const BOUNDARY =
+  /\bSchool of\b|^(?:Cedarville Theological Seminary|Combined Degree Programs?|Academic Schools)$|Faculty$|Course Descriptions$/;
+/** "Robert W. Plaster School of Business" is a school; its faculty list is not. */
+const SCHOOL = /^(?!.*Faculty$)(?:.*\bSchool of\b.*|Cedarville Theological Seminary)$/;
+const DESCRIPTIONS = /Course Descriptions$/;
+
+/** The registrar files the seminary under the school that houses it. */
+const SCHOOL_ALIASES: Record<string, string> = {
+  "Cedarville Theological Seminary": "School of Biblical and Theological Studies",
+};
+
+/** Contents headings, tidied into the names the rest of the engine uses. */
+export function graduateTitle(heading: string): string {
+  return heading
+    .replace(/\s*\(In Teach-Out\)\s*$/i, "")
+    .replace(/\s+Combined Degree Course Requirements$/, " Combined Degree")
+    .replace(/^MSN\s*[–—-]\s*(.+?)(?:\s+Track)?$/, "MSN, $1")
+    .replace(/^(Doctor of Nursing Practice) Program(?::\s*(.+))?$/, (_, degree, path) =>
+      path ? `${degree}, ${path}` : degree,
+    )
+    .trim();
+}
+
+export interface GraduateSpan {
+  heading: string;
+  title: string;
+  school: string | undefined;
+  /** First and last page the program's text runs across, inclusive. */
+  start: number;
+  end: number;
+  /** The heading that closes the span, when it shares the span's last page. */
+  until: string | undefined;
+}
+
+/**
+ * Cut the contents into one span of pages per program.
+ *
+ * A program runs from its heading to the next program or boundary heading,
+ * and several can share a page: the combined degrees stack four to a page. So
+ * a span also carries the heading that ends it when that heading lands on the
+ * same page, and the text is cut there rather than at the page break.
+ */
+export function graduateSpans(toc: TocEntry[]): GraduateSpan[] {
+  const opening = toc.findIndex((entry) => entry.title === "Academic Schools");
+  const body = opening < 0 ? toc : toc.slice(opening);
+  const closing = body.findIndex((entry) => DESCRIPTIONS.test(entry.title));
+  const headings = (closing < 0 ? body : body.slice(0, closing + 1)).filter(
+    (entry) =>
+      (PROGRAM.test(entry.title) && !NOT_PROGRAM.test(entry.title)) || BOUNDARY.test(entry.title),
+  );
+
+  const spans: GraduateSpan[] = [];
+  let school: string | undefined;
+  for (const [index, entry] of headings.entries()) {
+    if (SCHOOL.test(entry.title)) school = SCHOOL_ALIASES[entry.title] ?? entry.title;
+    if (BOUNDARY.test(entry.title)) continue;
+    const next = headings[index + 1];
+    const sharesPage = next !== undefined && next.page === entry.page;
+    // The next heading's page is where this program's text runs out. A program
+    // ending on the page before it ends at that page break; one ending on a
+    // later page is cut at the heading itself.
+    const end = next ? Math.max(entry.page, sharesPage ? next.page : next.page - 1) : entry.page;
+    spans.push({
+      heading: entry.title,
+      title: graduateTitle(entry.title),
+      school,
+      start: entry.page,
+      end,
+      until: next && next.page === end ? next.title : undefined,
+    });
+  }
+  return spans;
+}
+
+/**
+ * The span's text, cut at its own heading and at the one that ends it.
+ *
+ * A heading missing from the text, because the typesetting broke it across
+ * elements, costs only precision: the cut falls back to the page edge.
+ */
+export function spanText(span: GraduateSpan, pages: Map<number, string>): string {
+  const parts: string[] = [];
+  for (let page = span.start; page <= span.end; page++) {
+    let text = (pages.get(page) ?? "").replace(/\s+/g, " ");
+    let from = 0;
+    if (page === span.start) {
+      from = Math.max(0, text.indexOf(span.heading));
+      text = text.slice(from);
+    }
+    if (page === span.end && span.until) {
+      const at = text.indexOf(span.until, page === span.start ? span.heading.length : 0);
+      if (at >= 0) text = text.slice(0, at);
+    }
+    parts.push(text);
+  }
+  return parts.join(" ");
+}
+
+/** One graduate program, read off its span of text. */
+export function parseGraduateProgram(span: GraduateSpan, text: string): ProgramPage | undefined {
+  const courses = [...new Set(text.match(COURSE) ?? [])].sort();
+  if (!courses.length) return undefined;
+
+  // The graduate book prints its totals as "... Summary" blocks, one per track
+  // when a degree has tracks. The first is the degree as most students take it.
+  const at = text.search(/\bSummary\b/);
+  const summary = leaders(at >= 0 ? text.slice(at) : text, true);
+  return {
+    page: span.start,
+    title: span.title,
+    summary: summary.some((line) => TOTAL.test(line.label)) ? summary : [],
+    doubleCounts: [],
+    sequence: [],
+    courses,
+    school: span.school,
+  };
+}
+
+/**
+ * Programs named by more than one heading, merged into one.
+ *
+ * The combined degrees are printed once under each school that shares them,
+ * and two programs with the same title would be the same program counted
+ * twice by everything downstream.
+ */
+export function mergePrograms(programs: ProgramPage[]): ProgramPage[] {
+  const byTitle = new Map<string, ProgramPage>();
+  for (const program of programs) {
+    const seen = byTitle.get(program.title);
+    if (!seen) {
+      byTitle.set(program.title, program);
+      continue;
+    }
+    seen.courses = [...new Set([...seen.courses, ...program.courses])].sort();
+    if (!seen.summary.length) seen.summary = program.summary;
+  }
+  return [...byTitle.values()];
+}
+
+// ---- crawling ----------------------------------------------------------------
+
+async function crawlUndergraduate(year: CatalogYear, options: BookOptions): Promise<Book> {
   const { delayMs = 150, onProgress, signal, fetch: get = fetch } = options;
   const pages = await pageCount(year, get);
   const programs: ProgramPage[] = [];
@@ -407,5 +602,62 @@ export async function crawlBook(year: CatalogYear, options: BookOptions = {}): P
     if (page < pages && delayMs) await sleep(delayMs);
   }
 
-  return { year, pages, programs, fetchedAt: new Date().toISOString() };
+  return {
+    year,
+    edition: "undergraduate",
+    pages,
+    programs,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * The graduate book, read through its contents.
+ *
+ * Its program pages share no layout the undergraduate parser can hang off: a
+ * third have a Curriculum Summary, the rest spread one degree across five
+ * pages of tracks and suggested semesters. What every program does have is a
+ * contents entry, so the contents decide where each one starts and stops, and
+ * only the pages inside a program are fetched at all.
+ */
+async function crawlGraduate(year: CatalogYear, options: BookOptions): Promise<Book> {
+  const { delayMs = 150, onProgress, signal, fetch: get = fetch } = options;
+  const contents = await get(tocUrl(year, "graduate"), { signal });
+  if (!contents.ok) throw new Error(`no graduate catalog for ${year} (${contents.status})`);
+  const spans = graduateSpans(parseToc(await contents.text()));
+  if (!spans.length) throw new Error(`no programs in the graduate contents for ${year}`);
+
+  const wanted = [...new Set(spans.flatMap((s) => range(s.start, s.end)))].sort((a, b) => a - b);
+  const pages = new Map<number, string>();
+  for (const [index, page] of wanted.entries()) {
+    signal?.throwIfAborted();
+    const response = await get(pageUrl(year, page, "graduate"), { signal });
+    if (response.ok) pages.set(page, textOf(await response.text()));
+    onProgress?.({ page: index + 1, pages: wanted.length, programs: spans.length });
+    if (index < wanted.length - 1 && delayMs) await sleep(delayMs);
+  }
+
+  const programs = mergePrograms(
+    spans.flatMap((span) => parseGraduateProgram(span, spanText(span, pages)) ?? []),
+  );
+  return {
+    year,
+    edition: "graduate",
+    pages: wanted.length,
+    programs,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
+const range = (from: number, to: number) =>
+  Array.from({ length: to - from + 1 }, (_, i) => from + i);
+
+/** Read one edition of a catalog year, keeping only what describes a program. */
+export function crawlBook(
+  year: CatalogYear,
+  options: BookOptions & { edition?: Edition } = {},
+): Promise<Book> {
+  return options.edition === "graduate"
+    ? crawlGraduate(year, options)
+    : crawlUndergraduate(year, options);
 }

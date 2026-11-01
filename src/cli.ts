@@ -5,7 +5,8 @@
  *
  *   bun run engine import                  seed from the older projects
  *   bun run engine collect directory       sweep the directory (needs a session)
- *   bun run engine collect book            read the printed catalog
+ *   bun run engine collect book            read both printed catalogs
+ *                                          (--edition undergraduate|graduate)
  *   bun run engine collect campus          fetch the map off OpenStreetMap
  *   bun run engine harvester 2027SP        write the booklist userscript
  *   bun run engine ingest ~/Downloads/2027SP.json
@@ -16,7 +17,7 @@
  */
 
 import { writeFileSync } from "node:fs";
-import { crawlBook } from "./collect/book";
+import { crawlBook, EDITIONS, type Edition } from "./collect/book";
 import { collectCampus } from "./collect/campus";
 import { sweepDirectory } from "./collect/directory";
 import { buildHarvester, ingestFile } from "./collect/harvest";
@@ -31,6 +32,7 @@ import { buildings } from "./store/campus";
 import { termStats } from "./store/catalog";
 import { harvestTerms } from "./store/harvest";
 import { recentSweeps } from "./store/history";
+import { forgetSchools } from "./store/majors";
 import { findByName, peopleStats } from "./store/people";
 import { latestYear, programYears, replaceYear } from "./store/programs";
 
@@ -97,17 +99,37 @@ async function collect(what: string | undefined): Promise<void> {
     }
 
     case "book": {
-      const year = positional[2] ?? catalogYear();
-      const book = await crawlBook(year, {
-        onProgress: (p) =>
-          progress(`${pink(year)}  page ${p.page}/${p.pages}  ${p.programs} programs`),
-      });
-      endProgress();
-      replaceYear(year, book.programs, book.fetchedAt);
-      forgetModel();
+      // `--edition graduate` leaves "graduate" among the positionals, so the
+      // year is only taken when it looks like one.
+      const year = positional.slice(2).find((arg) => /^\d{4}-\d{4}$/.test(arg)) ?? catalogYear();
+      const asked = flag("edition");
+      if (asked && !EDITIONS.includes(asked as Edition)) {
+        console.error(`edition is one of: ${EDITIONS.join(", ")}`);
+        process.exit(1);
+      }
+      const editions = asked ? [asked as Edition] : EDITIONS;
       say("year", year);
-      say("pages", n(book.pages));
-      say("programs", n(book.programs.length));
+      for (const edition of editions) {
+        try {
+          const book = await crawlBook(year, {
+            edition,
+            onProgress: (p) =>
+              progress(
+                `${pink(year)} ${edition}  page ${p.page}/${p.pages}  ${p.programs} programs`,
+              ),
+          });
+          endProgress();
+          replaceYear(year, book.programs, book.fetchedAt, edition);
+          say(edition, `${n(book.programs.length)} programs, ${n(book.pages)} pages`);
+        } catch (error) {
+          endProgress();
+          // One book missing a year is no reason to throw away the other.
+          if (asked) throw error;
+          console.error(dim(`  ${edition}: ${(error as Error).message}`));
+        }
+      }
+      forgetModel();
+      forgetSchools();
       return;
     }
 

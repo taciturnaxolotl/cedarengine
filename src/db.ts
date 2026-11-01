@@ -155,15 +155,20 @@ CREATE TABLE IF NOT EXISTS rule_groups (
   PRIMARY KEY (requirement, subrequirement, grp)
 ) STRICT;
 
+-- One row per program in one edition of the book. The undergraduate and
+-- graduate catalogs number their pages independently, so a page is only an
+-- address within its edition.
 CREATE TABLE IF NOT EXISTS programs (
   year          TEXT NOT NULL,
+  edition       TEXT NOT NULL DEFAULT 'undergraduate',
   page          INTEGER NOT NULL,
   title         TEXT NOT NULL,
   total_credits REAL,
+  school        TEXT,
   courses       TEXT NOT NULL,
   payload       TEXT NOT NULL,
   fetched_at    TEXT NOT NULL,
-  PRIMARY KEY (year, page)
+  PRIMARY KEY (year, edition, page)
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS programs_title ON programs (title);
@@ -352,7 +357,35 @@ export function db(path = config.databasePath): Database {
   handle.exec("PRAGMA synchronous = NORMAL");
   handle.exec("PRAGMA foreign_keys = ON");
   handle.exec(SCHEMA);
+  migrate(handle);
   return handle;
+}
+
+/**
+ * Bring a database written by an older engine up to the current schema.
+ *
+ * SQLite cannot change a primary key in place, so a table whose key grew a
+ * column is rebuilt and its rows carried across. Each step checks for its own
+ * result first, which makes the whole thing safe to run on every open.
+ */
+function migrate(database: Database): void {
+  const columns = database
+    .query<{ name: string }, []>("PRAGMA table_info(programs)")
+    .all()
+    .map((c) => c.name);
+  if (!columns.includes("edition")) {
+    database.transaction(() => {
+      database.exec("ALTER TABLE programs RENAME TO programs_before_editions");
+      database.exec("DROP INDEX IF EXISTS programs_title");
+      database.exec(SCHEMA);
+      database.exec(
+        `INSERT INTO programs (year, edition, page, title, total_credits, courses, payload, fetched_at)
+         SELECT year, 'undergraduate', page, title, total_credits, courses, payload, fetched_at
+         FROM programs_before_editions`,
+      );
+      database.exec("DROP TABLE programs_before_editions");
+    })();
+  }
 }
 
 /** Point the process at a different file. Tests use ":memory:". */

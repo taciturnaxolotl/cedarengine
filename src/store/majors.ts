@@ -8,6 +8,7 @@
  */
 
 import { db } from "../db";
+import { programSchools } from "./programs";
 
 export interface Major {
   program: string;
@@ -72,6 +73,11 @@ let index: Map<string, string> | undefined;
 /**
  * The school a program belongs to, matched on the normalised title.
  *
+ * The registrar is asked first. Where it has no match, the school the book
+ * itself files the program under stands in: the graduate catalog names its
+ * degrees "Master of Divinity" where the registrar writes "MDiv, Master of
+ * Divinity", and the book knows which school it is printing under.
+ *
  * Cached, because the evaluation asks this once per label per guess and the
  * table is three hundred rows that change once a year.
  */
@@ -86,11 +92,15 @@ export function schoolOf(title: string): string | null {
       const key = programKey(row.program);
       if (key && !index.has(key)) index.set(key, row.school!);
     }
+    for (const row of programSchools()) {
+      const key = programKey(row.title);
+      if (key && !index.has(key)) index.set(key, row.school);
+    }
   }
   return index.get(programKey(title)) ?? null;
 }
 
-/** Called after an import, so the next lookup sees the new taxonomy. */
+/** Called after an import or a book collection, so the next lookup sees it. */
 export const forgetSchools = () => {
   index = undefined;
 };

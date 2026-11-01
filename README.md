@@ -48,7 +48,7 @@ thousand real people's rooms, phone numbers and inferred majors.
 ```bash
 bun run engine collect catalog 2027SP   # a term of sections and courses
 bun run engine collect catalog --all    # every course that exists, offered or not
-bun run engine collect book             # the printed catalog, ~340 pages
+bun run engine collect book             # both printed catalogs, undergraduate and graduate
 bun run engine collect campus           # OpenStreetMap plus the campus tour
 bun run engine collect directory        # the whole directory (needs a session)
 ```
