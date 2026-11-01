@@ -186,6 +186,23 @@ describe("both editions in one year", () => {
     expect(programYears()[0]?.editions).toEqual({ undergraduate: 1, graduate: 1 });
   });
 
+  test("programs printed on the same page are all kept", () => {
+    replaceYear(
+      "2026-2027",
+      [
+        program(68, "MBA/MSN Combined Degree", ["NSG-6050"]),
+        program(68, "PharmD/MBA Combined Degree", ["PHAR-7010"]),
+      ],
+      new Date().toISOString(),
+      "graduate",
+    );
+    expect(listPrograms("2026-2027", undefined, "graduate").map((p) => p.title)).toEqual([
+      "MBA/MSN Combined Degree",
+      "PharmD/MBA Combined Degree",
+    ]);
+    expect(programByPage("2026-2027", 68, "graduate")?.title).toBe("MBA/MSN Combined Degree");
+  });
+
   test("replacing one edition leaves the other alone", () => {
     replaceYear("2026-2027", [program(40, "Nursing", ["NSG-1000"])], "2026-01-01T00:00:00Z");
     replaceYear(
@@ -258,6 +275,43 @@ describe("a database from before editions", () => {
     // And opening it again is a no-op rather than a second migration.
     useDatabase(path);
     expect(listPrograms("2026-2027")).toHaveLength(1);
+  });
+
+  test("keyed on the page alone, makes room for a page's second program", () => {
+    const path = join(dir, "paged.db");
+    const old = new Database(path);
+    old.exec(`CREATE TABLE programs (
+      year TEXT NOT NULL, edition TEXT NOT NULL DEFAULT 'undergraduate', page INTEGER NOT NULL,
+      title TEXT NOT NULL, total_credits REAL, school TEXT, courses TEXT NOT NULL,
+      payload TEXT NOT NULL, fetched_at TEXT NOT NULL,
+      PRIMARY KEY (year, edition, page)) STRICT`);
+    old
+      .query("INSERT INTO programs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(
+        "2026-2027",
+        "graduate",
+        68,
+        "MBA/MSN Combined Degree",
+        36,
+        "School of Nursing",
+        '["NSG-6050"]',
+        JSON.stringify(program(68, "MBA/MSN Combined Degree", ["NSG-6050"])),
+        "2026-08-12T00:00:00Z",
+      );
+    old.close();
+
+    useDatabase(path);
+    expect(programByPage("2026-2027", 68, "graduate")?.school).toBe("School of Nursing");
+    replaceYear(
+      "2026-2027",
+      [
+        program(68, "MBA/MSN Combined Degree", ["NSG-6050"]),
+        program(68, "PharmD/MBA Combined Degree", ["PHAR-7010"]),
+      ],
+      "2026-09-01T00:00:00Z",
+      "graduate",
+    );
+    expect(listPrograms("2026-2027", undefined, "graduate")).toHaveLength(2);
   });
 });
 

@@ -157,7 +157,8 @@ CREATE TABLE IF NOT EXISTS rule_groups (
 
 -- One row per program in one edition of the book. The undergraduate and
 -- graduate catalogs number their pages independently, so a page is only an
--- address within its edition.
+-- address within its edition, and the graduate book prints several combined
+-- degrees on one page, so a page alone does not name a program either.
 CREATE TABLE IF NOT EXISTS programs (
   year          TEXT NOT NULL,
   edition       TEXT NOT NULL DEFAULT 'undergraduate',
@@ -168,7 +169,7 @@ CREATE TABLE IF NOT EXISTS programs (
   courses       TEXT NOT NULL,
   payload       TEXT NOT NULL,
   fetched_at    TEXT NOT NULL,
-  PRIMARY KEY (year, edition, page)
+  PRIMARY KEY (year, edition, page, title)
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS programs_title ON programs (title);
@@ -370,22 +371,29 @@ export function db(path = config.databasePath): Database {
  */
 function migrate(database: Database): void {
   const columns = database
-    .query<{ name: string }, []>("PRAGMA table_info(programs)")
-    .all()
-    .map((c) => c.name);
-  if (!columns.includes("edition")) {
-    database.transaction(() => {
-      database.exec("ALTER TABLE programs RENAME TO programs_before_editions");
-      database.exec("DROP INDEX IF EXISTS programs_title");
-      database.exec(SCHEMA);
-      database.exec(
-        `INSERT INTO programs (year, edition, page, title, total_credits, courses, payload, fetched_at)
-         SELECT year, 'undergraduate', page, title, total_credits, courses, payload, fetched_at
-         FROM programs_before_editions`,
-      );
-      database.exec("DROP TABLE programs_before_editions");
-    })();
-  }
+    .query<{ name: string; pk: number }, []>("PRAGMA table_info(programs)")
+    .all();
+  const names = columns.map((c) => c.name);
+  const key = columns.filter((c) => c.pk > 0).map((c) => c.name);
+  if (names.includes("edition") && key.includes("title")) return;
+
+  // Older tables predate the edition column, or keyed on the page alone; either
+  // way the rows carried across are kept, and a missing edition means the only
+  // book there was, the undergraduate one.
+  const edition = names.includes("edition") ? "edition" : "'undergraduate'";
+  const school = names.includes("school") ? "school" : "NULL";
+  database.transaction(() => {
+    database.exec("ALTER TABLE programs RENAME TO programs_before");
+    database.exec("DROP INDEX IF EXISTS programs_title");
+    database.exec(SCHEMA);
+    database.exec(
+      `INSERT OR IGNORE INTO programs
+         (year, edition, page, title, total_credits, school, courses, payload, fetched_at)
+       SELECT year, ${edition}, page, title, total_credits, ${school}, courses, payload, fetched_at
+       FROM programs_before`,
+    );
+    database.exec("DROP TABLE programs_before");
+  })();
 }
 
 /** Point the process at a different file. Tests use ":memory:". */

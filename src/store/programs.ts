@@ -71,8 +71,8 @@ export function replaceYear(
     `INSERT INTO programs
        (year, edition, page, title, total_credits, school, courses, payload, fetched_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(year, edition, page) DO UPDATE SET
-       title = excluded.title, total_credits = excluded.total_credits,
+     ON CONFLICT(year, edition, page, title) DO UPDATE SET
+       total_credits = excluded.total_credits,
        school = excluded.school, courses = excluded.courses, payload = excluded.payload,
        fetched_at = excluded.fetched_at`,
   );
@@ -160,7 +160,7 @@ export function programByPage(
 ): Program | null {
   const row = db()
     .query<ProgramRow, [string, string, number]>(
-      `${SELECT} WHERE year = ? AND edition = ? AND page = ?`,
+      `${SELECT} WHERE year = ? AND edition = ? AND page = ? ORDER BY title`,
     )
     .get(year, edition, page);
   return row ? hydrate(row) : null;
