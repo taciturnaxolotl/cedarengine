@@ -7,6 +7,7 @@
  *   bun run engine collect directory       sweep the directory (needs a session)
  *   bun run engine collect book            read both printed catalogs
  *                                          (--edition undergraduate|graduate)
+ *   bun run engine collect exams           the registrar's final exam tables
  *   bun run engine collect campus          fetch the map off OpenStreetMap
  *   bun run engine harvester 2027SP        write the booklist userscript
  *   bun run engine ingest ~/Downloads/2027SP.json
@@ -20,6 +21,7 @@ import { writeFileSync } from "node:fs";
 import { crawlBook, EDITIONS, type Edition } from "./collect/book";
 import { collectCampus } from "./collect/campus";
 import { sweepDirectory } from "./collect/directory";
+import { fetchExamSchedules } from "./collect/exams";
 import { buildHarvester, ingestFile } from "./collect/harvest";
 import { importAll } from "./collect/import";
 import { loadLabelsFile } from "./collect/labels";
@@ -30,6 +32,7 @@ import { guessAll, guessFor } from "./model/guess";
 import { forgetModel } from "./model/major";
 import { buildings } from "./store/campus";
 import { termStats } from "./store/catalog";
+import { saveExamSchedule } from "./store/exams";
 import { harvestTerms } from "./store/harvest";
 import { recentSweeps } from "./store/history";
 import { forgetSchools } from "./store/majors";
@@ -133,6 +136,20 @@ async function collect(what: string | undefined): Promise<void> {
       return;
     }
 
+    case "exams": {
+      const schedules = await fetchExamSchedules();
+      if (!schedules.length) {
+        console.error("no exam schedule pages could be read");
+        process.exit(1);
+      }
+      for (const schedule of schedules) {
+        saveExamSchedule(schedule);
+        say(schedule.term, `${n(schedule.slots.length)} exam slots`);
+        if (!schedule.fallback) console.error(dim(`  ${schedule.term}: catch-all rule unread`));
+      }
+      return;
+    }
+
     case "campus": {
       const result = await collectCampus();
       say("buildings", n(result.buildings));
@@ -152,7 +169,7 @@ async function collect(what: string | undefined): Promise<void> {
     }
 
     default:
-      console.error("collect what? directory | book | campus");
+      console.error("collect what? directory | book | exams | campus");
       process.exit(1);
   }
 }

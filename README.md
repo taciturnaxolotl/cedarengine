@@ -49,11 +49,12 @@ thousand real people's rooms, phone numbers and inferred majors.
 bun run engine collect catalog 2027SP   # a term of sections and courses
 bun run engine collect catalog --all    # every course that exists, offered or not
 bun run engine collect book             # both printed catalogs, undergraduate and graduate
+bun run engine collect exams            # the registrar's final exam tables, fall and spring
 bun run engine collect campus           # OpenStreetMap plus the campus tour
 bun run engine collect directory        # the whole directory (needs a session)
 ```
 
-The book and the map need nobody's permission: the publisher's page HTML and
+The book, the exam tables and the map need nobody's permission: the publisher's page HTML and
 Overpass are both public. Colleague's course search used to be, but it now
 redirects signed-out visitors to SSO, so `collect catalog` fails without a
 session and the extension below is what keeps the catalog current. The

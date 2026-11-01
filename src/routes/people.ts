@@ -1,6 +1,7 @@
 /** Who is here, where they live, what they are probably studying. */
 
 import { bool, json, notFound, num, q } from "../lib/http";
+import { examsFor } from "../model/exams";
 import { guessFor } from "../model/guess";
 import { scheduleFor, teachingFor } from "../model/schedule";
 import { locate } from "../store/campus";
@@ -112,6 +113,25 @@ export const peopleRoutes: RouteDef[] = [
       const teaching = teachingFor(request.params.id ?? "", q(url, "term"));
       if (!teaching) throw notFound("no sections list that person as an instructor");
       return json(teaching);
+    },
+  },
+  {
+    method: "GET",
+    path: "/v1/people/:id/exams",
+    tag: "people",
+    summary:
+      "A person's finals week: each section's exam slot and room, plus any clashes. Students from their booklist, instructors from what they teach",
+    query: [
+      {
+        name: "term",
+        description: "Term code. Defaults to the current one, then the newest held.",
+      },
+    ],
+    handler: (request, url) => {
+      const week = examsFor(request.params.id ?? "", q(url, "term"));
+      if (!week) throw notFound("no booklist or teaching load for that person");
+      if ("missing" in week) throw notFound(`no exam schedule collected for ${week.missing}`);
+      return json(week);
     },
   },
   {

@@ -144,7 +144,7 @@ const meetsInPerson = (meetings: Meeting[]): boolean =>
   meetings.some((meeting) => !meeting.online && meeting.days.length && meeting.start);
 
 /** Sections laid out by weekday, each day's blocks in order. */
-function arrange(rows: SectionRow[]): { scheduled: ScheduledSection[]; week: Day[] } {
+export function arrange(rows: SectionRow[]): { scheduled: ScheduledSection[]; week: Day[] } {
   const scheduled: ScheduledSection[] = rows.map((row) => ({
     name: row.name ?? "",
     code: row.code,

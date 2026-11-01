@@ -174,6 +174,15 @@ CREATE TABLE IF NOT EXISTS programs (
 
 CREATE INDEX IF NOT EXISTS programs_title ON programs (title);
 
+-- The registrar's final exam table for a term: class meeting slot to exam slot.
+-- Small and rewritten whole, so it lives as one payload per term.
+CREATE TABLE IF NOT EXISTS exams (
+  term       TEXT PRIMARY KEY,
+  source     TEXT NOT NULL,
+  payload    TEXT NOT NULL,
+  fetched_at TEXT NOT NULL
+) STRICT;
+
 -- One student's booklist for one term, plus the course codes it leaks. More
 -- terms per student is a richer fingerprint, which is the whole premise of the
 -- major model.
