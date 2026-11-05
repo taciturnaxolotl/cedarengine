@@ -160,6 +160,22 @@ export function arrange(rows: SectionRow[]): { scheduled: ScheduledSection[]; we
     for (const meeting of section.meetings) {
       if (!meeting.start || !meeting.end || meeting.online) continue;
       for (const day of meeting.days) {
+        const twin = week[day]!.blocks.find(
+          (block) =>
+            block.section === section.name &&
+            block.start === meeting.start &&
+            block.end === meeting.end &&
+            block.kind === meeting.kind,
+        );
+        if (twin) {
+          if (twin.building === meeting.building) {
+            twin.room = [twin.room, meeting.room].filter(Boolean).join(", ") || null;
+          } else {
+            twin.building = [twin.building, meeting.building].filter(Boolean).join(" / ") || null;
+            twin.room = [twin.room, meeting.room].filter(Boolean).join(" / ") || null;
+          }
+          continue;
+        }
         week[day]!.blocks.push({
           start: meeting.start,
           end: meeting.end,
