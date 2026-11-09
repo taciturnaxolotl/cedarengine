@@ -51,6 +51,9 @@ struct Person: Codable, Identifiable, Hashable, Sendable {
 
     var isStudentWorker: Bool { ["true", "y", "yes"].contains((studentWorker ?? "").lowercased()) }
 
+    /// High schoolers taking college courses, typed "DE" by the directory.
+    var isDualEnrollment: Bool { studentType?.uppercased() == "DE" }
+
     /// The directory's own photo, when it is a full URL anyone can load. Student
     /// photos are relative links into the campus portal, which needs a login.
     var directoryPhoto: Photo? {

@@ -12,6 +12,10 @@ final class Library {
     private(set) var recents: [Person] = []
     private(set) var syncing = false
     private(set) var syncedAt: Date?
+    /// What the filters can offer: only values somebody actually has.
+    private(set) var classes: [String] = []
+    private(set) var dorms: [String] = []
+    private(set) var departments: [String] = []
 
     @ObservationIgnored private var index: [Entry] = []
     private var byId: [String: Person] = [:]
@@ -78,13 +82,17 @@ final class Library {
 
     /// The server's rules, run locally: the first word starts a given name, the
     /// last a family name, any between either; or the whole query is a last name.
-    func search(_ query: String, limit: Int = 100) -> [Person] {
+    /// With an empty query and an active filter, everyone the filter lets
+    /// through, so the filters double as a way to browse.
+    func search(_ query: String, filter: PersonFilter = PersonFilter(), limit: Int = 100) -> [Person] {
         let folded = Entry.fold(query)
         let words = folded.split(whereSeparator: { $0.isWhitespace || $0 == "-" }).map(String.init)
-        guard !words.isEmpty else { return [] }
+        guard !words.isEmpty else {
+            return filter.isActive ? index.map(\.person).filter(filter.matches) : []
+        }
         let whole = folded.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         var out: [Person] = []
-        for entry in index {
+        for entry in index where filter.matches(entry.person) {
             let ordered = words.indices.allSatisfy { i in
                 entry.names(for: i, of: words.count).contains { $0.hasPrefix(words[i]) }
             }
@@ -118,9 +126,18 @@ final class Library {
 
     private func install(_ people: [Person]) {
         self.people = people
-        index = people.map(Entry.init)
+        index = people.map(Entry.init).sorted { ($0.last, $0.first) < ($1.last, $1.first) }
+        let students = people.filter(\.isStudent)
+        classes = Self.distinct(students.map(\.studentClass)).sorted(by: PersonFilter.classOrder)
+        dorms = Self.distinct(students.map(\.dormName)).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        departments = Self.distinct(people.filter(\.isEmployee).map(\.department))
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
         byId = Dictionary(people.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         recents = recents.map { byId[$0.id] ?? $0 }
+    }
+
+    private static func distinct(_ values: [String?]) -> [String] {
+        Array(Set(values.compactMap { $0?.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }))
     }
 
     private func pullDirectory() async -> [Person]? {
@@ -148,6 +165,7 @@ final class Library {
     private struct Entry {
         let person: Person
         let last: String
+        let first: String
         let given: [String]
         let family: [String]
         let user: String
@@ -155,6 +173,7 @@ final class Library {
         init(_ person: Person) {
             self.person = person
             last = Self.fold(person.lastName ?? "")
+            first = Self.fold(person.goesBy ?? person.firstName ?? "")
             given = Self.words(person.firstName, person.nickname)
             family = Self.words(person.lastName)
             user = Self.fold(person.username ?? "")
@@ -175,5 +194,41 @@ final class Library {
         static func fold(_ s: String) -> String {
             s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
         }
+    }
+}
+
+/// Narrows the directory by who someone is rather than what they are called.
+struct PersonFilter: Equatable {
+    enum Kind: Hashable { case everyone, students, dualEnrollment, employees }
+
+    var kind = Kind.everyone
+    var studentClass: String?
+    var dorm: String?
+    var department: String?
+    var workersOnly = false
+
+    var isActive: Bool { self != PersonFilter() }
+
+    func matches(_ person: Person) -> Bool {
+        switch kind {
+        case .everyone: break
+        case .students: guard person.isStudent, !person.isDualEnrollment else { return false }
+        case .dualEnrollment: guard !person.isEmployee, person.isDualEnrollment else { return false }
+        case .employees: guard person.isEmployee else { return false }
+        }
+        if let studentClass, person.studentClass != studentClass { return false }
+        if let dorm, person.dormName?.trimmingCharacters(in: .whitespaces) != dorm { return false }
+        if let department, person.department?.trimmingCharacters(in: .whitespaces) != department { return false }
+        if workersOnly, !person.isStudentWorker { return false }
+        return true
+    }
+
+    /// Freshman to senior, then pharmacy years, then graduate; unknown codes last.
+    private static let classRank = ["FR", "SO", "JR", "SR", "P1", "P2", "P3", "P4", "GR", "GS", "HS"]
+
+    static func classOrder(_ a: String, _ b: String) -> Bool {
+        let ra = classRank.firstIndex(of: a) ?? classRank.count
+        let rb = classRank.firstIndex(of: b) ?? classRank.count
+        return ra == rb ? a < b : ra < rb
     }
 }
