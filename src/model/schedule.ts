@@ -53,7 +53,9 @@ export interface Block {
   start: string;
   end: string;
   minutes: number;
+  /** Every section meeting in this slot, as a label: "EGGN-1910-01–16". */
   section: string;
+  sections: string[];
   title: string | null;
   kind: string | null;
   building: string | null;
@@ -155,44 +157,108 @@ export function arrange(rows: SectionRow[]): { scheduled: ScheduledSection[]; we
     meetings: meetingsOf(row),
   }));
 
-  const week: Day[] = DAY_NAMES.map((label, day) => ({ day, label, minutes: 0, blocks: [] }));
+  // Nobody is in two places at once. Sections meeting at the same hour, a
+  // cross-listing, two sections taught as one, parallel labs, are one block.
+  const slots = new Map<string, Slot>();
   for (const section of scheduled) {
     for (const meeting of section.meetings) {
       if (!meeting.start || !meeting.end || meeting.online) continue;
       for (const day of meeting.days) {
-        const twin = week[day]!.blocks.find(
-          (block) =>
-            block.section === section.name &&
-            block.start === meeting.start &&
-            block.end === meeting.end &&
-            block.kind === meeting.kind,
-        );
-        if (twin) {
-          if (twin.building === meeting.building) {
-            twin.room = [twin.room, meeting.room].filter(Boolean).join(", ") || null;
-          } else {
-            twin.building = [twin.building, meeting.building].filter(Boolean).join(" / ") || null;
-            twin.room = [twin.room, meeting.room].filter(Boolean).join(" / ") || null;
-          }
-          continue;
-        }
-        week[day]!.blocks.push({
+        const key = [day, meeting.start, meeting.end, meeting.kind].join("|");
+        const slot = slots.get(key) ?? {
+          day,
           start: meeting.start,
           end: meeting.end,
           minutes: meeting.minutes,
-          section: section.name,
-          title: section.title,
           kind: meeting.kind,
-          building: meeting.building,
-          room: meeting.room,
-        });
-        week[day]!.minutes += meeting.minutes;
+          sections: new Set<string>(),
+          titles: new Set<string>(),
+          rooms: [],
+        };
+        slots.set(key, slot);
+        slot.sections.add(section.name);
+        if (section.title) slot.titles.add(section.title);
+        slot.rooms.push([meeting.building, meeting.room]);
       }
     }
+  }
+
+  const week: Day[] = DAY_NAMES.map((label, day) => ({ day, label, minutes: 0, blocks: [] }));
+  for (const slot of slots.values()) {
+    const sections = [...slot.sections].sort();
+    week[slot.day]!.blocks.push({
+      start: slot.start,
+      end: slot.end,
+      minutes: slot.minutes,
+      section: sectionLabel(sections),
+      sections,
+      title: [...slot.titles].join(" / ") || null,
+      kind: slot.kind,
+      ...placeOf(slot.rooms),
+    });
+    week[slot.day]!.minutes += slot.minutes;
   }
   for (const day of week) day.blocks.sort((a, b) => a.start.localeCompare(b.start));
 
   return { scheduled, week };
+}
+
+interface Slot {
+  day: number;
+  start: string;
+  end: string;
+  minutes: number;
+  kind: string | null;
+  sections: Set<string>;
+  titles: Set<string>;
+  rooms: [building: string | null, room: string | null][];
+}
+
+/** "EGGN-1910-01" through "-16" as "EGGN-1910-01–16"; different courses stay apart. */
+export function sectionLabel(names: string[]): string {
+  const byCourse = new Map<string, string[]>();
+  for (const name of names) {
+    const cut = name.lastIndexOf("-");
+    const course = cut < 0 ? name : name.slice(0, cut);
+    const suffixes = byCourse.get(course) ?? [];
+    if (cut >= 0) suffixes.push(name.slice(cut + 1));
+    byCourse.set(course, suffixes);
+  }
+  return [...byCourse]
+    .map(([course, suffixes]) => (suffixes.length ? `${course}-${runs(suffixes)}` : course))
+    .join(" / ");
+}
+
+/** Three or more consecutive section numbers read as a range. */
+function runs(suffixes: string[]): string {
+  const next = (a: string, b: string) => /^\d+$/.test(a) && /^\d+$/.test(b) && +b === +a + 1;
+  const parts: string[] = [];
+  for (let i = 0; i < suffixes.length; ) {
+    let j = i;
+    while (j + 1 < suffixes.length && next(suffixes[j]!, suffixes[j + 1]!)) j++;
+    if (j - i >= 2) parts.push(`${suffixes[i]}–${suffixes[j]}`);
+    else parts.push(...suffixes.slice(i, j + 1));
+    i = j + 1;
+  }
+  return parts.join(", ");
+}
+
+/** One building's rooms as "141, 142"; several buildings side by side with " / ". */
+function placeOf(rooms: Slot["rooms"]): { building: string | null; room: string | null } {
+  const byBuilding = new Map<string | null, string[]>();
+  for (const [building, room] of rooms) {
+    const held = byBuilding.get(building) ?? [];
+    if (room && !held.includes(room)) held.push(room);
+    byBuilding.set(building, held);
+  }
+  return {
+    building: [...byBuilding.keys()].filter(Boolean).join(" / ") || null,
+    room:
+      [...byBuilding.values()]
+        .map((held) => held.join(", "))
+        .filter(Boolean)
+        .join(" / ") || null,
+  };
 }
 
 export function scheduleFor(studentId: string, term?: string): Schedule | null {

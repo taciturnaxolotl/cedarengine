@@ -206,3 +206,78 @@ describe("what a professor teaches", () => {
     expect(teachingFor("1")).toBeNull();
   });
 });
+
+describe("sections that meet together", () => {
+  const kohl = { InstructorDetails: [{ FacultyId: "1143731", FacultyName: "Dr. Kohl" }] };
+  const lab = (name: string, room: string) =>
+    section(name, {
+      Title: "Engr, Comp, & Christian Voc",
+      ...kohl,
+      FormattedMeetingTimes: [meeting([1], "08:00", "09:50", room, "Laboratory")],
+    });
+
+  beforeEach(() => {
+    replaceTerm({
+      term: "2026FA",
+      fetchedAt: AT,
+      courses: [],
+      sections: [
+        section("EGCP-1010-01", { Title: "Digital Logic Design", ...kohl }),
+        section("EGCP-1010-02", { Title: "Digital Logic Design", ...kohl }),
+        section("EGCP-4810-01", {
+          Title: "Sr Design I",
+          ...kohl,
+          FormattedMeetingTimes: [meeting([1], "11:00", "11:50", "222")],
+        }),
+        section("EGEE-4810-01", {
+          Title: "EE Senior Design I",
+          ...kohl,
+          FormattedMeetingTimes: [meeting([1], "11:00", "11:50", "222")],
+        }),
+        lab("EGGN-1910-01", "141"),
+        lab("EGGN-1910-02", "142"),
+        lab("EGGN-1910-03", "145"),
+      ],
+    });
+  });
+
+  test("one professor at one hour is one block, counted once", async () => {
+    const { teachingFor } = await import("../src/model/schedule");
+    const monday = teachingFor("1143731")?.week.find((d) => d.day === 1);
+    expect(monday?.blocks.map((b) => [b.start, b.section, b.title, b.room])).toEqual([
+      ["08:00", "EGGN-1910-01–03", "Engr, Comp, & Christian Voc", "141, 142, 145"],
+      ["09:00", "EGCP-1010-01, 02", "Digital Logic Design", "345"],
+      ["11:00", "EGCP-4810-01 / EGEE-4810-01", "Sr Design I / EE Senior Design I", "222"],
+    ]);
+    expect(monday?.blocks[1]?.sections).toEqual(["EGCP-1010-01", "EGCP-1010-02"]);
+    expect(monday?.minutes).toBe(110 + 50 + 50);
+  });
+
+  test("a shared lecture merges while each section's own lab stays apart", async () => {
+    const { arrange } = await import("../src/model/schedule");
+    const { sectionsByName } = await import("../src/store/catalog");
+    const dld = (name: string, labDay: number, labStart: string) =>
+      section(name, {
+        Title: "Digital Logic Design",
+        ...kohl,
+        FormattedMeetingTimes: [
+          meeting([2, 4], "08:30", "09:45", "345"),
+          meeting([labDay], labStart, "16:50", "141", "Instructional Laboratory"),
+        ],
+      });
+    replaceTerm({
+      term: "2026FA",
+      fetchedAt: AT,
+      courses: [],
+      sections: [dld("EGCP-1010-01", 1, "15:00"), dld("EGCP-1010-02", 2, "15:00")],
+    });
+
+    const { week } = arrange(sectionsByName("2026FA", ["EGCP-1010-01", "EGCP-1010-02"]));
+    const on = (day: number) => week[day]!.blocks.map((b) => [b.start, b.section]);
+    expect(on(1)).toEqual([["15:00", "EGCP-1010-01"]]);
+    expect(on(2)).toEqual([
+      ["08:30", "EGCP-1010-01, 02"],
+      ["15:00", "EGCP-1010-02"],
+    ]);
+  });
+});
