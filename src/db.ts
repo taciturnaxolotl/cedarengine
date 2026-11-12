@@ -213,6 +213,26 @@ CREATE TABLE IF NOT EXISTS photos (
   fetched_at   TEXT NOT NULL
 ) STRICT;
 
+-- What the directory only says on a person's own page.
+--
+-- The search that fills "people" returns a row per match and stops there. The
+-- "More Info" page behind each row adds a campus mailbox and the class they
+-- will come back for reunions with. That is
+-- one request per person rather than one per prefix, so it is its own slow
+-- sweep and its own table: the directory sweep rewrites "people" every run and
+-- would take these with it.
+--
+-- A row with every field NULL is somebody who was asked about and had nothing,
+-- which is different from somebody nobody has asked about yet.
+CREATE TABLE IF NOT EXISTS person_details (
+  student_id    TEXT PRIMARY KEY,
+  reunion_class TEXT,
+  po_box        TEXT,
+  fetched_at    TEXT NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS person_details_reunion ON person_details (reunion_class);
+
 -- A booklist that changes mid-term is a schedule change: a course added, one
 -- dropped. That is signal the merged fingerprint throws away, so the delta is
 -- kept even though the current list is what gets scored.

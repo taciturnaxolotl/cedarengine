@@ -128,18 +128,50 @@ export function planBooklists(term: string, limit = 500, types = ["UG", "UGO", "
  * then drifts back over everyone slowly.
  */
 export function planPhotos(limit = 500, maxAgeDays = 90) {
+  const rows = stalePeople<{ id: string; url: string }>({
+    table: "photos",
+    maxAgeDays,
+    columns: "p.id AS id, p.photo_url AS url",
+    filter: "p.photo_url IS NOT NULL AND p.photo_url <> '' AND p.photo_url NOT LIKE 'http%'",
+  });
+  return { remaining: rows.length, ids: rows.slice(0, limit) };
+}
+
+/**
+ * Whose own directory page needs fetching, for the fields only it carries.
+ *
+ * Everyone still listed, staff included: a professor has an email and, often
+ * enough, a reunion class. The never-asked come first, then anyone not asked in
+ * `maxAgeDays`. Mailboxes are reassigned over the summer and a reunion class
+ * moves when somebody falls a year behind, so the window is short enough to
+ * notice either within a term and long enough that ten thousand single
+ * requests are spread thin.
+ */
+export function planDetails(limit = 500, maxAgeDays = 45) {
+  const rows = stalePeople<{ id: string }>({ table: "person_details", maxAgeDays });
+  return { remaining: rows.length, ids: rows.slice(0, limit).map((r) => r.id) };
+}
+
+interface StaleQuery {
+  /** A per-person table keyed by student_id with a fetched_at. */
+  table: "photos" | "person_details";
+  maxAgeDays: number;
+  columns?: string;
+  filter?: string;
+}
+
+/** Listed people with no row in `table` yet, then the stalest, oldest first. */
+function stalePeople<Row>({ table, maxAgeDays, columns = "p.id AS id", filter }: StaleQuery) {
   const cutoff = new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000).toISOString();
-  const rows = db()
-    .query<{ id: string; url: string }, [string]>(
-      `SELECT p.id AS id, p.photo_url AS url FROM people p
-       LEFT JOIN photos ph ON ph.student_id = p.id
-       WHERE p.present = 1
-         AND p.photo_url IS NOT NULL AND p.photo_url <> '' AND p.photo_url NOT LIKE 'http%'
-         AND (ph.student_id IS NULL OR ph.fetched_at < ?)
-       ORDER BY ph.fetched_at IS NOT NULL, p.last_name, p.first_name`,
+  return db()
+    .query<Row, [string]>(
+      `SELECT ${columns} FROM people p
+       LEFT JOIN ${table} t ON t.student_id = p.id
+       WHERE p.present = 1 ${filter ? `AND ${filter}` : ""}
+         AND (t.student_id IS NULL OR t.fetched_at < ?)
+       ORDER BY t.fetched_at IS NOT NULL, t.fetched_at, p.last_name, p.first_name`,
     )
     .all(cutoff);
-  return { remaining: rows.length, ids: rows.slice(0, limit) };
 }
 
 const SEASONS: Record<string, number> = { SP: 0, SU: 1, FA: 2 };

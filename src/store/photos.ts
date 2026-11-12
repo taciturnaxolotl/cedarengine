@@ -52,6 +52,23 @@ export function putPhoto(
   return "stored";
 }
 
+export interface PhotoRow {
+  id: string;
+  contentType?: string;
+  base64: string;
+}
+
+/** Store a posted batch, skipping rows with no id or no image. */
+export function putPhotos(rows: PhotoRow[]): { stored: number; unchanged: number } {
+  const tally = { stored: 0, unchanged: 0 };
+  for (const row of rows) {
+    if (!row?.id || !row.base64) continue;
+    const bytes = Uint8Array.fromBase64(row.base64);
+    tally[putPhoto(row.id, row.contentType || "image/jpeg", bytes)]++;
+  }
+  return tally;
+}
+
 /**
  * Record that a person has no photo on file.
  *

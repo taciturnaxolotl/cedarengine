@@ -22,6 +22,10 @@ export const peopleRoutes: RouteDef[] = [
       { name: "department", description: "Department description, exact" },
       { name: "type", description: "Student type: UG, UGO, GS, P4" },
       { name: "class", description: "Class: FR, SO, JR, SR" },
+      {
+        name: "reunion",
+        description: "Reunion class, exact: 2030. Only people whose own page has been fetched.",
+      },
       { name: "gone", description: "Include people the directory has stopped listing" },
       {
         name: "fact.*",
@@ -46,6 +50,7 @@ export const peopleRoutes: RouteDef[] = [
           department: q(url, "department"),
           type: q(url, "type"),
           class: q(url, "class"),
+          reunion: q(url, "reunion"),
           facts,
           has: url.searchParams.getAll("has").filter(Boolean),
           includeGone: bool(url, "gone"),

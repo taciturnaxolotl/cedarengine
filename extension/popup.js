@@ -28,6 +28,7 @@ const PHASES = {
   catalog: "catalog",
   booklists: "booklists",
   photos: "photos",
+  details: "details",
   idle: "idle",
 };
 
@@ -94,6 +95,16 @@ function view(state) {
       }
       break;
 
+    case "details":
+      if (state.note) lines.push(state.note);
+      if (state.detailed != null) {
+        lines.push(
+          `${plural(state.detailed, "person")}${state.queued != null ? ` · ${state.queued} left` : ""}`,
+        );
+        fill = pct(state.detailed, state.queued);
+      }
+      break;
+
     default: {
       // idle — the standing report of the last run.
       const when = state.at ? ago(state.at) : null;
@@ -103,6 +114,7 @@ function view(state) {
       if (state.terms) bits.push(`${plural(state.terms, "term")}`);
       if (state.collected) bits.push(`${plural(state.collected, "booklist")}`);
       if (state.stored) bits.push(`${plural(state.stored, "photo")}`);
+      if (state.detailed) bits.push(`${plural(state.detailed, "detail page")}`);
       if (bits.length) lines.push(bits.join(" · "));
       if (when) lines.push(`last sync ${when}`);
       if (state.failed?.length) lines.push(`catalog missed: ${state.failed.join(" ")}`);
@@ -190,6 +202,7 @@ el("directory").onclick = run("directory");
 el("catalog").onclick = run("catalog");
 el("booklists").onclick = run("booklists");
 el("photos").onclick = run("photos");
+el("details").onclick = run("details");
 
 // Open onto whatever the last known state was.
 try {

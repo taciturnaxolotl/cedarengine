@@ -536,6 +536,75 @@ export async function syncPhotos() {
   return setStatus({ phase: "idle", photosAt: Date.now(), stored });
 }
 
+// ---- directory details ---------------------------------------------------
+
+/**
+ * What one person's own directory page adds to their search row: the reunion
+ * class and the campus mailbox. The page carries a good deal more (a home
+ * address, advisors, a schedule) and none of it is read.
+ *
+ * Returns the two fields, "miss" when the directory has no page for that id
+ * (it answers 400), or null when the request failed in a way worth retrying.
+ */
+async function fetchDetails(id) {
+  let response;
+  try {
+    response = await fetch(`${DIRECTORY}/CedarInfo/Info/Json?id=${encodeURIComponent(id)}`, {
+      credentials: "include",
+      redirect: "manual",
+      headers: { "x-requested-with": "XMLHttpRequest", accept: "*/*" },
+    });
+  } catch {
+    return null; // network blip; leave them for the next run
+  }
+  if (response.type === "opaqueredirect" || response.redirected) throw new SignedOut();
+  if (response.status === 401) throw new SignedOut();
+  if (response.status >= 500) return null;
+  if (!response.ok) return "miss";
+  const person = (await response.json().catch(() => null))?.person;
+  if (!person || typeof person !== "object") return "miss";
+  return { reunionClass: person.reunionclass, poBox: person.box };
+}
+
+export async function syncDetails() {
+  const { batch, delayMs } = await settings();
+  let plan = await engine("/v1/sync/start", { kind: "details", limit: 500 });
+  const sweep = plan.sweep;
+  let detailed = 0;
+  // Ids that failed this run. The plan keeps offering them first, since nothing
+  // was recorded, so they are stepped over here rather than asked forty times.
+  const failed = new Set();
+
+  while (plan.ids?.length) {
+    const slice = plan.ids.filter((id) => !failed.has(String(id))).slice(0, batch);
+    if (!slice.length) break;
+    const rows = [];
+    const missed = [];
+    for (const id of slice) {
+      const details = await fetchDetails(id);
+      if (details === "miss") missed.push(String(id));
+      else if (details) rows.push({ id: String(id), ...details });
+      else failed.add(String(id));
+      await setStatus({ phase: "details", detailed, queued: plan.remaining });
+      if (delayMs) await sleep(delayMs);
+    }
+
+    // Nobody in the batch answered at all: the network, not the people.
+    if (!rows.length && !missed.length) break;
+    // A whole batch of refusals is more likely a session that died quietly
+    // than forty people without a page, and posting it would shelve all of
+    // them until the staleness window came back around.
+    if (!rows.length && !(await selfServiceReady())) throw new SignedOut();
+    const posted = await engine("/v1/sync/details", { sweep, rows, missed });
+    detailed += rows.length;
+    plan = posted;
+    await setStatus({ phase: "details", note: null, detailed, queued: posted.remaining });
+    if (posted.done) break;
+  }
+
+  return setStatus({ phase: "idle", detailsAt: Date.now(), detailed });
+}
+
 // ---- the loop ------------------------------------------------------------
 
 export async function syncAll({ refresh = false } = {}) {
@@ -557,6 +626,9 @@ export async function syncAll({ refresh = false } = {}) {
     // Photos lean on the same Self-Service session, so they ride along at the
     // end once the directory is known.
     await syncPhotos();
+    // One request per person, so the slowest pass by far. Last, where nothing
+    // waits on it and a closed laptop costs only the tail of it.
+    await syncDetails();
     return setStatus({ phase: "idle", error: null });
   } catch (error) {
     if (error instanceof SignedOut) {
@@ -574,6 +646,7 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     catalog: () => syncCatalog(),
     booklists: () => syncBooklists({ term: message.term }),
     photos: () => syncPhotos(),
+    details: () => syncDetails(),
     manifest: () => engine("/v1/sync/manifest"),
     status: async () => (await chrome.storage.local.get("status")).status ?? {},
   };

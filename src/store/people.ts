@@ -38,6 +38,12 @@ export interface Person {
   studentWorker: string | null;
   empInactive: string | null;
   photoUrl: string | null;
+  /** The username at cedarville.edu, which is what every directory page prints. */
+  email: string | null;
+  /** The graduating class they belong to, e.g. "2030". Null until their page is fetched. */
+  reunionClass: string | null;
+  /** Campus mailbox number. Null until their page is fetched, and for anyone without one. */
+  poBox: string | null;
   /** 1 while the last complete sweep still found them. */
   present: number;
   firstSeen: string;
@@ -80,6 +86,16 @@ const value = (row: DirectoryRow, key: string): string | null => {
   return text === "" ? null : text;
 };
 
+/**
+ * The person_details columns, plus the email. It is one row per person at most,
+ * so the join never multiplies anybody, and no column names collide with
+ * people's. The email is derived: every directory page checked printed exactly
+ * the username at cedarville.edu.
+ */
+const DETAILS = `
+  CASE WHEN username IS NOT NULL THEN lower(username) || '@cedarville.edu' END AS email,
+  d.reunion_class AS reunionClass, d.po_box AS poBox`;
+
 const SELECT = `SELECT
   id, username, first_name AS firstName, last_name AS lastName, middle_name AS middleName,
   nickname, city, state, country, department, title,
@@ -87,8 +103,8 @@ const SELECT = `SELECT
   office_phone AS officePhone, dorm_code AS dormCode, dorm_name AS dormName,
   dorm_room AS dormRoom, student_type AS studentType, student_class AS studentClass,
   student_worker AS studentWorker, emp_inactive AS empInactive, photo_url AS photoUrl,
-  first_seen AS firstSeen, last_seen AS lastSeen
-FROM people`;
+  first_seen AS firstSeen, last_seen AS lastSeen,${DETAILS}
+FROM people LEFT JOIN person_details d ON d.student_id = people.id`;
 
 export interface UpsertTally {
   seen: number;
@@ -216,6 +232,8 @@ export interface PeopleQuery {
   department?: string;
   type?: string;
   class?: string;
+  /** Reunion class, e.g. "2030". Only matches people whose page has been fetched. */
+  reunion?: string;
   /** Facts that must be true of them: key to value. */
   facts?: Record<string, string>;
   /** Facts they must carry, whatever the value says. */
@@ -259,6 +277,11 @@ export function searchPeople(query: PeopleQuery): Person[] {
     if (!given) continue;
     where.push(`${column} LIKE ?`);
     args.push(given);
+  }
+
+  if (query.reunion) {
+    where.push("d.reunion_class = ?");
+    args.push(query.reunion);
   }
 
   // Facts live in their own table, so this could be a join. EXISTS instead,

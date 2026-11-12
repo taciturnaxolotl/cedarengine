@@ -119,10 +119,12 @@ struct PersonView: View {
         Section {
             Field("Full Name", person.fullName)
             Field("Room", person.room)
+            Field("PO Box", person.poBox)
             if person.isStudent {
                 Field("Class", glossary.className(person.studentClass))
                 Field("Program", glossary.typeName(person.studentType))
             }
+            Field("Reunion Class", person.reunionClass)
             Field("Hometown", person.hometown)
             Field("Title", person.title)
             Field("Department", person.department)
@@ -135,6 +137,13 @@ struct PersonView: View {
                 }
             }
             if person.isStudentWorker { Field("Student Worker", "Yes") }
+            if let mail = person.mail {
+                LabeledContent("Email") {
+                    Link(mail.display, destination: mail.url)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+            }
             Field("Username", person.username)
             if person.present == 0 {
                 LabeledContent("Status") { Text("Not Listed").foregroundStyle(.orange) }

@@ -13,19 +13,26 @@
  */
 
 import { fileCrawl } from "../collect/catalog";
-import { planBooklists, planCatalog, planDirectory, planPhotos } from "../collect/plan";
+import {
+  planBooklists,
+  planCatalog,
+  planDetails,
+  planDirectory,
+  planPhotos,
+} from "../collect/plan";
 import { db } from "../db";
 import { badRequest, body, json, q } from "../lib/http";
 import { currentTerm } from "../lib/terms";
 import { ALL_COURSES } from "../store/catalog";
+import { type DetailRow, type DetailTally, markNoDetails, putDetails } from "../store/details";
 import { ingestHarvest } from "../store/harvest";
 import { bumpSweep, finishSweep, lastSweep, startSweep } from "../store/history";
 import { retireUnseen, upsertPeople } from "../store/people";
-import { markNoPhoto, putPhoto } from "../store/photos";
+import { markNoPhoto, type PhotoRow, putPhotos } from "../store/photos";
 import type { RouteDef } from "./types";
 
 interface StartBody {
-  kind?: "directory" | "booklists" | "catalog" | "photos";
+  kind?: "directory" | "booklists" | "catalog" | "photos" | "details";
   /** Sweep the whole name space again. Required before anyone can be retired. */
   refresh?: boolean;
   term?: string;
@@ -56,11 +63,53 @@ interface BooklistBody {
   rows?: { id: string | number; books?: any[] }[];
 }
 
-interface PhotoBody {
+interface PersonBatchBody<Row> {
   sweep?: number;
-  rows?: { id: string; contentType?: string; base64: string }[];
-  /** Ids the courier tried but the portal had no photo for. */
+  rows?: Row[];
+  /** Ids the courier asked about that the source had nothing for. */
   missed?: string[];
+}
+
+/** A sweep that fetches one thing per person: photos, detail pages. */
+interface PersonSweep<Row, Tally extends object> {
+  path: string;
+  summary: string;
+  body: string;
+  rowShape: string;
+  store: (rows: Row[]) => Tally;
+  /** How a stored batch reads in the sweep log. */
+  counts: (tally: Tally) => { added: number; changed: number };
+  miss: (id: string) => void;
+  plan: () => { remaining: number; ids: unknown[] };
+}
+
+function personSweepRoute<Row, Tally extends object>(sweep: PersonSweep<Row, Tally>): RouteDef {
+  return {
+    method: "POST",
+    path: sweep.path,
+    tag: "sync",
+    summary: sweep.summary,
+    body: sweep.body,
+    handler: async (request) => {
+      const payload = await body<PersonBatchBody<Row>>(request);
+      const rows = payload.rows ?? [];
+      const missed = payload.missed ?? [];
+      if (!Array.isArray(rows) || !Array.isArray(missed)) {
+        throw badRequest(`rows must be an array of ${sweep.rowShape}, missed an array of ids`);
+      }
+
+      const tally = sweep.store(rows);
+      for (const id of missed) if (id) sweep.miss(String(id));
+      if (payload.sweep) {
+        bumpSweep(payload.sweep, { seen: rows.length + missed.length, ...sweep.counts(tally) });
+      }
+
+      const plan = sweep.plan();
+      const done = plan.remaining === 0;
+      if (payload.sweep && done) finishSweep(payload.sweep, { complete: true });
+      return json({ ...plan, ...tally, missed: missed.length, done });
+    },
+  };
 }
 
 const sweepStartedAt = (id: number): string | null =>
@@ -94,7 +143,7 @@ export const syncRoutes: RouteDef[] = [
     path: "/v1/sync/start",
     tag: "sync",
     summary: "Open a sweep and get the first batch of work",
-    body: '{ "kind": "directory" | "booklists" | "catalog", "refresh": false, "term": "2027SP", "limit": 100, "listed": ["2026FA"] }',
+    body: '{ "kind": "directory" | "booklists" | "catalog" | "photos" | "details", "refresh": false, "term": "2027SP", "limit": 100, "listed": ["2026FA"] }',
     handler: async (request) => {
       const options = await body<StartBody>(request);
       const kind = options.kind ?? "directory";
@@ -116,6 +165,11 @@ export const syncRoutes: RouteDef[] = [
       if (kind === "photos") {
         const sweep = startSweep("photos", "extension");
         return json({ sweep, kind, ...planPhotos(options.limit ?? 200) });
+      }
+
+      if (kind === "details") {
+        const sweep = startSweep("details", "extension");
+        return json({ sweep, kind, ...planDetails(options.limit ?? 200) });
       }
 
       // A fresh generation is the only thing that can prove somebody left, so
@@ -204,44 +258,26 @@ export const syncRoutes: RouteDef[] = [
       return json({ ...plan, ...tally, term, done: plan.remaining === 0 });
     },
   },
-  {
-    method: "POST",
+  personSweepRoute<PhotoRow, { stored: number; unchanged: number }>({
     path: "/v1/sync/photos",
-    tag: "sync",
     summary: "Post fetched directory photos and get the next batch of ids",
-    body: '{ "sweep": 15, "rows": [{ "id": "1234567", "contentType": "image/jpeg", "base64": "..." }] }',
-    handler: async (request) => {
-      const payload = await body<PhotoBody>(request);
-      const rows = payload.rows ?? [];
-      const missed = payload.missed ?? [];
-      if (!Array.isArray(rows))
-        throw badRequest("rows must be an array of { id, contentType, base64 }");
-
-      let stored = 0;
-      let unchanged = 0;
-      for (const row of rows) {
-        if (!row?.id || !row.base64) continue;
-        const bytes = Uint8Array.fromBase64(row.base64);
-        const result = putPhoto(row.id, row.contentType || "image/jpeg", bytes);
-        if (result === "stored") stored++;
-        else unchanged++;
-      }
-      for (const id of missed) if (id) markNoPhoto(String(id));
-
-      const seen = rows.length + missed.length;
-      if (payload.sweep) bumpSweep(payload.sweep, { seen, added: stored, changed: unchanged });
-
-      const plan = planPhotos(200);
-      if (payload.sweep && plan.remaining === 0) finishSweep(payload.sweep, { complete: true });
-      return json({
-        ...plan,
-        stored,
-        unchanged,
-        missed: missed.length,
-        done: plan.remaining === 0,
-      });
-    },
-  },
+    body: '{ "sweep": 15, "rows": [{ "id": "1234567", "contentType": "image/jpeg", "base64": "..." }], "missed": ["7654321"] }',
+    rowShape: "{ id, contentType, base64 }",
+    store: putPhotos,
+    counts: ({ stored, unchanged }) => ({ added: stored, changed: unchanged }),
+    miss: markNoPhoto,
+    plan: () => planPhotos(200),
+  }),
+  personSweepRoute<DetailRow, DetailTally>({
+    path: "/v1/sync/details",
+    summary: "Post what each person's own directory page says and get the next batch of ids",
+    body: '{ "sweep": 16, "rows": [{ "id": "1234567", "reunionClass": "2030", "poBox": "4102" }], "missed": ["7654321"] }',
+    rowShape: "{ id, reunionClass, poBox }",
+    store: putDetails,
+    counts: ({ stored, changed }) => ({ added: stored, changed }),
+    miss: markNoDetails,
+    plan: () => planDetails(200),
+  }),
   {
     method: "POST",
     path: "/v1/sync/catalog",

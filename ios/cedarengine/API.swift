@@ -23,6 +23,9 @@ struct Person: Codable, Identifiable, Hashable, Sendable {
     let studentClass: String?
     let studentWorker: String?
     let photoUrl: String?
+    let email: String?
+    let reunionClass: String?
+    let poBox: String?
     let present: Int?
     let firstSeen: String?
     let lastSeen: String?
@@ -90,6 +93,11 @@ struct Person: Codable, Identifiable, Hashable, Sendable {
     var hometown: String? {
         let parts = [city, state, country].clean
         return parts.isEmpty ? nil : parts.joined(separator: ", ")
+    }
+
+    var mail: (display: String, url: URL)? {
+        guard let email, !email.isEmpty, let url = URL(string: "mailto:\(email)") else { return nil }
+        return (email, url)
     }
 
     var initials: String {

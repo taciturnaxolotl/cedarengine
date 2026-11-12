@@ -15,7 +15,14 @@
 
 import { db } from "../db";
 
-export type SweepKind = "directory" | "booklists" | "catalog" | "book" | "campus" | "photos";
+export type SweepKind =
+  | "directory"
+  | "booklists"
+  | "catalog"
+  | "book"
+  | "campus"
+  | "photos"
+  | "details";
 export type SweepSource = "cli" | "extension" | "import";
 
 export interface Sweep {
