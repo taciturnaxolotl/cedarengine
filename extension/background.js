@@ -26,6 +26,7 @@ const DEFAULTS = {
 const ALARM = "cedarengine-sync";
 const DIRECTORY = "https://selfservice.cedarville.edu";
 const DIRECTORY_PAGE = `${DIRECTORY}/CedarInfo/Directory`;
+const STUDENT_PAGE = `${DIRECTORY}/Student/Student/Courses/Search`;
 /** The registrar, not a load test. Never faster than this between pages. */
 const CATALOG_DELAY_MS = 300;
 const STORE_PAGE = "https://store.cedarville.edu/textbook/index/search";
@@ -59,8 +60,10 @@ async function engine(path, body) {
 // ---- the directory -------------------------------------------------------
 
 class SignedOut extends Error {
-  constructor() {
+  /** The page whose session lapsed; opening it in a tab signs it back in. */
+  constructor(page = DIRECTORY_PAGE) {
     super("signed out of Self-Service");
+    this.page = page;
   }
 }
 
@@ -87,10 +90,9 @@ async function directoryQuery(last, first) {
 }
 
 /**
- * A data-free check that the SSO session is live. The directory landing page is
- * HTML behind the same login and returns 200 when signed in; a redirect off it
- * means signed out. (The course-search page 302s even when authenticated, so it
- * is no good as a probe.)
+ * A data-free check that the CedarInfo session is live. The directory landing
+ * page is HTML behind the login and returns 200 when signed in; a redirect off
+ * it means signed out.
  */
 async function selfServiceReady() {
   try {
@@ -106,24 +108,49 @@ async function selfServiceReady() {
 }
 
 /**
- * Auth first. Self-Service needs an SSO session the server cannot hold, so make
- * one is live before the sweep leans on it. If signed out, open the sign-in
- * page and wait a few minutes for the person to finish rather than failing the
- * whole run on the first query.
+ * The same check for the Student app the catalog lives in. It keeps its own
+ * session, which lapses independently of CedarInfo's. Its page redirects even
+ * when signed in, so the redirect is followed and the landing URL is the signal.
+ */
+async function studentReady() {
+  try {
+    const response = await fetch(STUDENT_PAGE, {
+      credentials: "include",
+      headers: { accept: "text/html" },
+    });
+    return response.ok && !bounced(response);
+  } catch {
+    return false;
+  }
+}
+
+/** CedarInfo first: its sign-in is the real SSO one, after which Student follows silently. */
+const LOGINS = [
+  { page: DIRECTORY_PAGE, ready: selfServiceReady },
+  { page: STUDENT_PAGE, ready: studentReady },
+];
+
+/**
+ * Auth first. Self-Service needs SSO sessions the server cannot hold, so make
+ * sure both are live before the sweep leans on them. Opening a lapsed app's page
+ * in a tab is what signs it back in, so do that and wait a few minutes for the
+ * person to finish rather than failing the whole run on the first query.
  */
 async function ensureSelfService() {
-  if (await selfServiceReady()) return true;
-  await chrome.tabs.create({ url: DIRECTORY_PAGE, active: true });
-  for (let waited = 0; waited < 180_000; waited += 3000) {
-    await setStatus({
-      phase: "signin",
-      note: `waiting for sign-in · ${Math.round(waited / 1000)}s`,
-    });
-    await sleep(3000);
-    if (await selfServiceReady()) {
-      await setStatus({ phase: "directory", note: null });
+  const opened = new Set();
+  for (let waited = 0; waited <= 180_000; waited += 3000) {
+    const dead = [];
+    for (const login of LOGINS) if (!(await login.ready())) dead.push(login);
+    if (!dead.length) {
+      if (waited) await setStatus({ phase: "directory", note: null });
       return true;
     }
+    if (!opened.has(dead[0].page)) {
+      opened.add(dead[0].page);
+      await chrome.tabs.create({ url: dead[0].page, active: true });
+    }
+    await setStatus({ phase: "signin", note: `waiting for sign-in · ${waited / 1000}s` });
+    await sleep(3000);
   }
   return false;
 }
@@ -183,11 +210,11 @@ const bounced = (response) =>
  * why collecting it moved into the signed-in browser.
  */
 async function courseSearchToken() {
-  const response = await fetch(`${DIRECTORY}/Student/Student/Courses/Search`, {
+  const response = await fetch(STUDENT_PAGE, {
     credentials: "include",
     headers: { accept: "text/html" },
   });
-  if (bounced(response)) throw new SignedOut();
+  if (bounced(response)) throw new SignedOut(STUDENT_PAGE);
   const html = await response.text();
   const token = /name="__RequestVerificationToken"[^>]*value="([^"]+)"/.exec(html)?.[1];
   if (!token) throw new Error("no antiforgery token on the course search page");
@@ -207,7 +234,7 @@ async function courseJson(token, path, body) {
     },
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (bounced(response)) throw new SignedOut();
+  if (bounced(response)) throw new SignedOut(STUDENT_PAGE);
   const data = await response.json().catch(() => null);
   if (!data) throw new Error(`${path} returned something other than JSON`);
   return data;
@@ -632,7 +659,7 @@ export async function syncAll({ refresh = false } = {}) {
     return setStatus({ phase: "idle", error: null });
   } catch (error) {
     if (error instanceof SignedOut) {
-      await chrome.tabs.create({ url: DIRECTORY_PAGE, active: true });
+      await chrome.tabs.create({ url: error.page, active: true });
       return setStatus({ phase: "idle", error: "sign in to Self-Service, then sync again" });
     }
     return setStatus({ phase: "idle", error: String(error.message ?? error) });
