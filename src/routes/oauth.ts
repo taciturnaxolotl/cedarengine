@@ -14,6 +14,8 @@ import type { RouteDef } from "./types";
 export const CLIENTS = ["web", "tokens", "ios", "extension"] as const;
 export type ClientName = (typeof CLIENTS)[number];
 
+export const LOGO = "https://l4.dunkirk.sh/i/RJ29mrqVuCp4.webp";
+
 export const clientId = (name: ClientName) => `${config.publicUrl}/oauth/${name}.json`;
 
 const NAMES: Record<ClientName, string> = {
@@ -42,6 +44,7 @@ export const oauthRoutes: RouteDef[] = [
       return json({
         resource: config.publicUrl,
         resource_name: "cedarengine",
+        logo_uri: LOGO,
         authorization_servers: [config.indikoUrl],
         bearer_methods_supported: ["header"],
         clients: Object.fromEntries(CLIENTS.map((name) => [name, clientId(name)])),
@@ -62,6 +65,7 @@ export const oauthRoutes: RouteDef[] = [
         client_id: clientId(name),
         client_name: NAMES[name],
         client_uri: config.publicUrl,
+        logo_uri: LOGO,
         redirect_uris: redirectUris(name),
         grant_types: ["authorization_code", "refresh_token"],
         response_types: ["code"],
