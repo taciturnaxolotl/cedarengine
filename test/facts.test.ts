@@ -101,6 +101,22 @@ describe("asserting facts", () => {
 });
 
 describe("retracting", () => {
+  test("how a GroupMe id was matched is refused, and the id still goes in", () => {
+    expect(() =>
+      assertFacts("1", [
+        { key: "groupme.id", value: "12345", source: "assassins" },
+        {
+          key: "groupme.id.note",
+          value: "matched by the Marshall 1-2 roster",
+          source: "assassins",
+        },
+      ]),
+    ).toThrow(/not kept/);
+    expect(factsFor("1")).toHaveLength(0);
+    assertFacts("1", [{ key: "groupme.id", value: "12345", source: "assassins" }]);
+    expect(factsFor("1").map((f) => f.key)).toEqual(["groupme.id"]);
+  });
+
   test("a retracted fact stops being current but stays in the log", () => {
     assertFacts("1", [{ key: "groupme.id", value: "12345", source: "assassins" }]);
     expect(retractFact("1", "groupme.id", "assassins")).toBe(true);

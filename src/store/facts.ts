@@ -14,7 +14,7 @@
  * side by side and the caller decides which it believes.
  */
 
-import { db } from "../db";
+import { db, REFUSED_FACT_KEYS } from "../db";
 
 export interface Fact {
   key: string;
@@ -113,6 +113,9 @@ function guardSlotting(studentId: string, fact: Assertion) {
  */
 export function assertFacts(studentId: string, facts: Assertion[], at = new Date().toISOString()) {
   if (!facts.length) return 0;
+  const refused = facts.find((fact) => REFUSED_FACT_KEYS.includes(fact.key));
+  if (refused)
+    throw new Error(`"${refused.key}" is not kept here; send the id without how it was matched`);
   const insert = db().query(
     `INSERT INTO person_facts (student_id, key, slot, value, json, source, at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,

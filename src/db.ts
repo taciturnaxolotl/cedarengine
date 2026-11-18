@@ -449,6 +449,13 @@ export function db(path = config.databasePath): Database {
 }
 
 /**
+ * Fact keys the engine will not keep. A GroupMe id is worth having so an
+ * outside system can find a person; how that match was made names the groups
+ * they are in, which is nobody's business here.
+ */
+export const REFUSED_FACT_KEYS: readonly string[] = ["groupme.id.note"];
+
+/**
  * Bring a database written by an older engine up to the current schema.
  *
  * SQLite cannot change a primary key in place, so a table whose key grew a
@@ -456,6 +463,10 @@ export function db(path = config.databasePath): Database {
  * result first, which makes the whole thing safe to run on every open.
  */
 function migrate(database: Database): void {
+  // Really deleted, log and all: a tombstone would still be storing it.
+  const refused = database.query("DELETE FROM person_facts WHERE key = ?");
+  for (const key of REFUSED_FACT_KEYS) refused.run(key);
+
   const columns = database
     .query<{ name: string; pk: number }, []>("PRAGMA table_info(programs)")
     .all();

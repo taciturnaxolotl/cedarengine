@@ -259,7 +259,6 @@ struct PersonView: View {
     private func label(for key: String) -> String {
         switch key {
         case "groupme.name": "GroupMe"
-        case "groupme.id.note": "GroupMe Note"
         default: key.replacingOccurrences(of: ".", with: " ").capitalized
         }
     }
