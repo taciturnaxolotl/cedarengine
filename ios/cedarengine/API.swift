@@ -300,22 +300,6 @@ struct Loose: Decodable, Sendable {
 
 // MARK: - Client
 
-enum APIError: LocalizedError {
-    case unauthorized
-    case forbidden
-    case notFound
-    case status(Int)
-
-    var errorDescription: String? {
-        switch self {
-        case .unauthorized: "The sign-in was refused."
-        case .forbidden: "Your role cannot see this."
-        case .notFound: "Nothing there."
-        case .status(let code): "The server answered \(code)."
-        }
-    }
-}
-
 /// Where an answer comes from: the server, or the last answer the server gave.
 enum Source: Sendable { case network, cache }
 
@@ -324,6 +308,13 @@ struct API: Sendable {
     static let pageSize = 500
 
     let auth: Auth
+    /// Ended the moment the engine refuses `auth`; nil while a candidate sign-in is being checked.
+    let session: Session?
+
+    init(auth: Auth, session: Session? = nil) {
+        self.auth = auth
+        self.session = session
+    }
 
     /// The engine's own photo for a person. `AsyncImage` cannot send a header,
     /// so the token rides in the query; the engine takes it either way. Returns
@@ -351,7 +342,7 @@ struct API: Sendable {
     }
 
     /// The cheapest authenticated question: one row of the directory. Throws
-    /// `unauthorized` for a bad token and whatever the network says otherwise.
+    /// `signedOut` for a refused sign-in and whatever the network says otherwise.
     func verify() async throws {
         _ = try await search("", limit: 1)
     }
@@ -431,31 +422,41 @@ struct API: Sendable {
         let key = Disk.key(path, query)
         if source == .cache {
             guard let data = Disk.read(key) else { throw APIError.notFound }
-            if data == Data("null".utf8) { throw APIError.notFound }
-            return try JSONDecoder().decode(T.self, from: data)
+            guard data != Data("null".utf8), let value = try? JSONDecoder().decode(T.self, from: data) else {
+                throw APIError.notFound
+            }
+            return value
         }
 
+        let data: Data
+        do {
+            data = try await fetch(path, query)
+        } catch APIError.signedOut(let reason) {
+            await session?.end(reason, for: auth)
+            throw APIError.signedOut(reason)
+        }
+        guard let value = try? JSONDecoder().decode(T.self, from: data) else {
+            throw APIError.failed("cedarengine sent an answer this app can't read.")
+        }
+        if store { Disk.write(data, for: key) }
+        return value
+    }
+
+    private func fetch(_ path: String, _ query: [String: String]) async throws -> Data {
         var components = URLComponents(url: Self.base.appending(path: path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty {
             components.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
         }
         var request = URLRequest(url: components.url!)
         request.setValue("Bearer \(try await auth.bearer())", forHTTPHeaderField: "Authorization")
-        var (data, response) = try await URLSession.shared.data(for: request)
-        var code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        var (data, code) = try await HTTP.send(request)
         // An indiko token can lapse between the expiry check and the server; renew once and retry.
-        if code == 401 {
+        if code == 401, auth.kind == .indiko {
             request.setValue("Bearer \(try await auth.bearer(force: true))", forHTTPHeaderField: "Authorization")
-            (data, response) = try await URLSession.shared.data(for: request)
-            code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            (data, code) = try await HTTP.send(request)
         }
-        if code == 401 { throw APIError.unauthorized }
-        if code == 403 { throw APIError.forbidden }
-        if code == 404 { throw APIError.notFound }
-        guard (200..<300).contains(code) else { throw APIError.status(code) }
-        let value = try JSONDecoder().decode(T.self, from: data)
-        if store { Disk.write(data, for: key) }
-        return value
+        guard (200..<300).contains(code) else { throw APIError(status: code, body: data, credential: auth.kind) }
+        return data
     }
 }
 
@@ -511,5 +512,9 @@ enum When {
 extension Result where Failure == Error {
     init(_ body: () async throws -> Success) async {
         do { self = .success(try await body()) } catch { self = .failure(error) }
+    }
+
+    var failure: (any Error)? {
+        if case .failure(let error) = self { error } else { nil }
     }
 }

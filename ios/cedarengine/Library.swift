@@ -16,6 +16,8 @@ final class Library {
     private(set) var classes: [String] = []
     private(set) var dorms: [String] = []
     private(set) var departments: [String] = []
+    /// Why the last refresh fell short when the network or server failed; the cache still shows.
+    private(set) var problem: String?
 
     @ObservationIgnored private var index: [Entry] = []
     private var byId: [String: Person] = [:]
@@ -56,28 +58,32 @@ final class Library {
         syncing = true
         defer { syncing = false }
 
-        // A narrower role than the one the cache was filled under: drop what it should no longer show.
-        if let access = try? await api.access(), access != UserDefaults.standard.string(forKey: Self.accessKey) {
-            if UserDefaults.standard.string(forKey: Self.accessKey) != nil {
-                Self.wipe()
-                recents = []
-                install([])
-                photos = [:]
-            }
-            UserDefaults.standard.set(access, forKey: Self.accessKey)
+        problem = nil
+
+        do {
+            adopt(access: try await api.access())
+        } catch APIError.forbidden, APIError.notFound {
+            // An engine or role without /v1/me: nothing to compare the cache against, so sync anyway.
+        } catch {
+            report(error)
+            return
         }
 
         async let photos = try? api.photos()
         async let glossary = try? api.glossary()
-        async let people = pullDirectory()
+        do {
+            let people = try await pullDirectory()
+            if !people.isEmpty {
+                install(people)
+                syncedAt = .now
+                UserDefaults.standard.set(syncedAt, forKey: Self.syncedKey)
+                Task.detached(priority: .utility) { Self.writeDirectory(people) }
+            }
+        } catch {
+            report(error)
+        }
         if let photos = await photos { self.photos = photos }
         if let glossary = await glossary { self.glossary = glossary }
-        if let people = await people, !people.isEmpty {
-            install(people)
-            syncedAt = .now
-            UserDefaults.standard.set(syncedAt, forKey: Self.syncedKey)
-            Task.detached(priority: .utility) { Self.writeDirectory(people) }
-        }
     }
 
     /// The newest copy of somebody, so a page opened from an old cache or a
@@ -137,6 +143,24 @@ final class Library {
 
     // MARK: Private
 
+    /// A sign-in refusal ends the session elsewhere; only what a retry could fix is worth showing.
+    private func report(_ error: any Error) {
+        if error.isTransient { problem = error.localizedDescription }
+    }
+
+    /// A narrower role than the one the cache was filled under: drop what it should no longer show.
+    private func adopt(access: String) {
+        let previous = UserDefaults.standard.string(forKey: Self.accessKey)
+        guard access != previous else { return }
+        if previous != nil {
+            Self.wipe()
+            recents = []
+            install([])
+            photos = [:]
+        }
+        UserDefaults.standard.set(access, forKey: Self.accessKey)
+    }
+
     private func install(_ people: [Person]) {
         self.people = people
         index = people.map(Entry.init).sorted { ($0.last, $0.first) < ($1.last, $1.first) }
@@ -153,12 +177,12 @@ final class Library {
         Array(Set(values.compactMap { $0?.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }))
     }
 
-    private func pullDirectory() async -> [Person]? {
+    private func pullDirectory() async throws -> [Person] {
         var all: [Person] = []
         var seen = Set<String>()
         var offset = 0
         while true {
-            guard let page = try? await api.page(offset: offset) else { return nil }
+            let page = try await api.page(offset: offset)
             for person in page where seen.insert(person.id).inserted { all.append(person) }
             if page.count < API.pageSize { return all }
             offset += API.pageSize

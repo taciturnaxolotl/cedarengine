@@ -20,6 +20,8 @@ struct PersonView: View {
     @State private var facts: [Fact] = []
     @State private var roommates: Roommates = .none
     @State private var loaded = false
+    /// Why the server's answers did not arrive, so the page admits it is showing the cache.
+    @State private var problem: String?
     @State private var day = 1
     @State private var viewing: Viewing?
     @Namespace private var zoom
@@ -66,7 +68,21 @@ struct PersonView: View {
         .listStyle(.insetGrouped)
         .navigationBarTitleDisplayMode(.inline)
         .overlay(alignment: .bottom) {
-            if !loaded { ProgressView().padding(.bottom, 24) }
+            if !loaded {
+                ProgressView().padding(.bottom, 24)
+            } else if let problem {
+                Button {
+                    Task { await fill(from: .network) }
+                } label: {
+                    Label("\(problem) Tap to retry.", systemImage: "exclamationmark.triangle")
+                        .font(.footnote)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.thinMaterial, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(.bottom, 16)
+            }
         }
         .task { await load() }
         .fullScreenCover(item: $viewing) { viewing in
@@ -312,11 +328,18 @@ struct PersonView: View {
         if case .success(let found) = history { self.history = found } else if Self.hidden(history) { self.history = nil }
         if case .success(let found) = facts { self.facts = found } else if Self.hidden(facts) { self.facts = [] }
         if case .success(let found) = roommates { self.roommates = found } else if Self.hidden(roommates) { self.roommates = .none }
+
+        // Only what a retry could fix; a 403 or 404 already shaped the sections above.
+        guard source == .network else { return }
+        problem = [schedule.failure, teaching.failure, major.failure, history.failure, facts.failure, roommates.failure]
+            .compactMap { $0 }
+            .first { $0.isTransient }?
+            .localizedDescription
     }
 
     private static func hidden<T>(_ result: Result<T, any Error>) -> Bool {
-        if case .failure(APIError.forbidden) = result { return true }
-        return false
+        guard case .failure(let error) = result, case APIError.forbidden = error else { return false }
+        return true
     }
 }
 

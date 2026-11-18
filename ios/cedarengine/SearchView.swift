@@ -2,7 +2,7 @@ import SwiftUI
 
 struct SearchView: View {
     @State var library: Library
-    let onSignOut: () -> Void
+    let session: Session
 
     @State private var query = ""
     @State private var remote: [Person] = []
@@ -40,6 +40,7 @@ struct SearchView: View {
                         }
                     }
                 } else if trimmed.isEmpty {
+                    if library.api.auth.kind == .legacy { migration }
                     if !library.recents.isEmpty {
                         Section {
                             ForEach(library.recents) { person in
@@ -60,7 +61,8 @@ struct SearchView: View {
                         NavigationLink(value: person) { PersonRow(person: person, library: library) }
                     }
                 }
-                if trimmed.isEmpty, !filter.isActive, library.syncing || library.syncedAt != nil {
+                if trimmed.isEmpty, !filter.isActive,
+                   library.syncing || library.syncedAt != nil || library.problem != nil {
                     status
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
@@ -91,8 +93,7 @@ struct SearchView: View {
                     }
                     .disabled(library.syncing)
                     Button("Sign Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
-                        Library.wipe()
-                        onSignOut()
+                        session.end()
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
@@ -108,6 +109,22 @@ struct SearchView: View {
                 await library.load()
             }
             .task(id: query) { await searchRemotely() }
+        }
+    }
+
+    /// Shown to phones still on the shared token from before indiko, which an admin may retire any day.
+    private var migration: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("cedarengine now signs in with indiko")
+                    .font(.headline)
+                Text("This phone still uses the old shared token. Switch now so you keep access when it is retired.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                IndikoSignInButton(session: session)
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding(.vertical, 4)
         }
     }
 
@@ -181,8 +198,16 @@ struct SearchView: View {
     }
 
     @ViewBuilder private var placeholder: some View {
-        if let error, !library.hasDirectory {
-            ContentUnavailableView("Can't Search", systemImage: "exclamationmark.triangle", description: Text(error))
+        if !library.hasDirectory, let failure = error ?? library.problem {
+            ContentUnavailableView {
+                Label("Can't Search", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(failure)
+            } actions: {
+                Button("Try Again") {
+                    Task { if trimmed.isEmpty { await library.refresh() } else { await searchRemotely() } }
+                }
+            }
         } else if browsing {
             if results.isEmpty {
                 ContentUnavailableView(
@@ -207,6 +232,12 @@ struct SearchView: View {
             if library.syncing {
                 ProgressView().controlSize(.mini)
                 Text("Updating…")
+            } else if let problem = library.problem {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+                Text(library.syncedAt.map { "\(problem) Showing the copy from \($0.formatted(.relative(presentation: .named)))." } ?? problem)
+                Button("Retry") { Task { await library.refresh() } }
+                    .buttonStyle(.borderless)
             } else if let at = library.syncedAt {
                 Text("\(library.people.count.formatted()) people · Updated \(at.formatted(.relative(presentation: .named)))")
             }
@@ -233,10 +264,9 @@ struct SearchView: View {
             guard !Task.isCancelled else { return }
             remote = found
             error = nil
-        } catch is CancellationError {
-        } catch let urlError as URLError where urlError.code == .cancelled {
-        } catch {
+        } catch where !Task.isCancelled {
             self.error = error.localizedDescription
+        } catch {
         }
     }
 }

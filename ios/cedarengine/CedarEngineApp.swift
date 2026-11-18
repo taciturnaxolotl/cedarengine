@@ -2,7 +2,7 @@ import SwiftUI
 
 @main
 struct CedarEngineApp: App {
-    @State private var auth = Self.debugToken.map { Auth(.token($0)) } ?? Auth.stored()
+    @State private var session = Session(auth: Self.debugToken.map { Auth(.pasted($0)) } ?? Auth.stored())
 
     /// Lets the simulator be driven from the command line without signing in.
     private static var debugToken: String? {
@@ -15,14 +15,11 @@ struct CedarEngineApp: App {
 
     var body: some Scene {
         WindowGroup {
-            if let auth {
-                SearchView(library: Library(api: API(auth: auth))) {
-                    Keychain.deleteAll()
-                    self.auth = nil
-                }
-                .id(ObjectIdentifier(auth))
+            if let auth = session.auth {
+                SearchView(library: Library(api: API(auth: auth, session: session)), session: session)
+                    .id(ObjectIdentifier(auth))
             } else {
-                SignInView { auth = $0 }
+                SignInView(session: session)
             }
         }
     }
