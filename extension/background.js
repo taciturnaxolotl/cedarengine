@@ -13,6 +13,8 @@
  * sweep logic gets smarter.
  */
 
+import { oauthBearer, oauthState, signIn, signOut } from "./oauth.js";
+
 const DEFAULTS = {
   engine: "http://127.0.0.1:3000",
   token: "",
@@ -41,18 +43,29 @@ async function setStatus(patch) {
   return now;
 }
 
-/** Talking to the engine. Every route but /health wants the bearer token. */
+/**
+ * Talking to the engine. An indiko sign-in wins over a pasted token; a 401 on
+ * an indiko token gets one forced refresh before giving up.
+ */
 async function engine(path, body) {
   const { engine: base, token } = await settings();
-  const response = await fetch(base.replace(/\/$/, "") + path, {
-    method: body ? "POST" : "GET",
-    headers: {
-      authorization: `Bearer ${token}`,
-      ...(body ? { "content-type": "application/json" } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (response.status === 401) throw new Error("the engine rejected the token");
+  const send = (bearer) =>
+    fetch(base.replace(/\/$/, "") + path, {
+      method: body ? "POST" : "GET",
+      headers: {
+        authorization: `Bearer ${bearer}`,
+        ...(body ? { "content-type": "application/json" } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  const signedIn = await oauthBearer();
+  let response = await send(signedIn ?? token);
+  if (response.status === 401 && signedIn) {
+    const renewed = await oauthBearer({ force: true });
+    if (renewed) response = await send(renewed);
+  }
+  if (response.status === 401) throw new Error("the engine rejected the sign-in; sign in again");
+  if (response.status === 403) throw new Error(`${path}: this sign-in's role cannot sync`);
   if (!response.ok) throw new Error(`${path} returned ${response.status}`);
   return response.json();
 }
@@ -676,6 +689,9 @@ chrome.runtime.onMessage.addListener((message, _sender, respond) => {
     details: () => syncDetails(),
     manifest: () => engine("/v1/sync/manifest"),
     status: async () => (await chrome.storage.local.get("status")).status ?? {},
+    signIn: async () => signIn((await settings()).engine),
+    signOut: () => signOut(),
+    account: () => oauthState(),
   };
   const handler = handlers[message.type];
   if (!handler) return false;

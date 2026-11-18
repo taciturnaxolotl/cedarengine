@@ -2,9 +2,9 @@ import SwiftUI
 
 @main
 struct CedarEngineApp: App {
-    @State private var token = Self.debugToken ?? Keychain.read()
+    @State private var auth = Self.debugToken.map { Auth(.token($0)) } ?? Auth.stored()
 
-    /// Lets the simulator be driven from the command line without typing a token.
+    /// Lets the simulator be driven from the command line without signing in.
     private static var debugToken: String? {
         #if DEBUG
         ProcessInfo.processInfo.environment["CEDAR_TOKEN"]
@@ -15,17 +15,14 @@ struct CedarEngineApp: App {
 
     var body: some Scene {
         WindowGroup {
-            if let token, !token.isEmpty {
-                SearchView(library: Library(api: API(token: token))) {
-                    Keychain.delete()
-                    self.token = nil
+            if let auth {
+                SearchView(library: Library(api: API(auth: auth))) {
+                    Keychain.deleteAll()
+                    self.auth = nil
                 }
-                .id(token)
+                .id(ObjectIdentifier(auth))
             } else {
-                TokenView { entered in
-                    Keychain.save(entered)
-                    token = entered
-                }
+                SignInView { auth = $0 }
             }
         }
     }

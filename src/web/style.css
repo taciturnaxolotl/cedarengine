@@ -1,0 +1,278 @@
+/* The admin and account pages share one look, the dashboard's. */
+:root {
+  --ink: #ece7df;
+  --dim: #8b8378;
+  --bg: #14120f;
+  --panel: #1c1916;
+  --line: #2b2621;
+  --pink: #ff87d7;
+  --blue: #3987e5;
+  --aqua: #199e70;
+  --orange: #d95926;
+}
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font:
+    13px / 1.6 "JetBrains Mono",
+    ui-monospace,
+    SFMono-Regular,
+    monospace;
+  padding: 2rem 1.5rem 4rem;
+}
+main {
+  max-width: 1080px;
+  margin: 0 auto;
+}
+a {
+  color: var(--blue);
+}
+h1 {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 2.75rem;
+  font-weight: 400;
+}
+h1 em {
+  color: var(--pink);
+  font-style: italic;
+}
+h2 {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 1.4rem;
+  font-weight: 400;
+  margin: 2rem 0 0.2rem;
+}
+header p,
+.note {
+  color: var(--dim);
+}
+.note {
+  font-size: 11px;
+  margin-bottom: 0.85rem;
+}
+nav.tabs {
+  display: flex;
+  gap: 1.25rem;
+  border-bottom: 1px solid var(--line);
+  margin-top: 1.5rem;
+}
+nav.tabs a {
+  color: var(--dim);
+  text-decoration: none;
+  padding: 0.5rem 0;
+  border-bottom: 2px solid transparent;
+}
+nav.tabs a[aria-current="page"] {
+  color: var(--ink);
+  border-color: var(--pink);
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.5rem;
+}
+th {
+  text-align: left;
+  color: var(--dim);
+  font-weight: 400;
+  font-size: 11px;
+  padding: 0.35rem 0.6rem 0.35rem 0;
+  border-bottom: 1px solid var(--line);
+}
+td {
+  padding: 0.35rem 0.6rem 0.35rem 0;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+td.c,
+th.c {
+  text-align: center;
+}
+.wrap {
+  overflow-x: auto;
+}
+input,
+select {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font: inherit;
+  padding: 0.45rem 0.6rem;
+}
+input[type="checkbox"] {
+  accent-color: var(--pink);
+  width: 1rem;
+  height: 1rem;
+}
+button {
+  background: var(--pink);
+  color: var(--bg);
+  border: 0;
+  font: inherit;
+  font-weight: 700;
+  padding: 0.45rem 1rem;
+  cursor: pointer;
+}
+button.quiet {
+  background: none;
+  color: var(--blue);
+  font-weight: 400;
+  padding: 0;
+}
+button.danger {
+  background: none;
+  color: var(--orange);
+  font-weight: 400;
+  padding: 0;
+}
+form.row,
+.row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 0.75rem 0;
+}
+form.row input[type="text"] {
+  flex: 1;
+  min-width: 12rem;
+}
+.badge {
+  font-size: 11px;
+  padding: 0 0.4rem;
+  border: 1px solid var(--line);
+  color: var(--dim);
+}
+.badge.live {
+  color: var(--aqua);
+  border-color: var(--aqua);
+}
+.badge.canary {
+  color: var(--orange);
+  border-color: var(--orange);
+}
+.secret {
+  background: var(--panel);
+  border: 1px solid var(--pink);
+  padding: 0.75rem;
+  margin: 0.75rem 0;
+}
+.secret code {
+  display: block;
+  word-break: break-all;
+  margin: 0.4rem 0;
+  color: var(--pink);
+}
+.err {
+  color: var(--pink);
+}
+.gate {
+  max-width: 480px;
+  margin: 3rem auto;
+}
+.gate input {
+  width: 100%;
+  margin: 0.75rem 0;
+}
+.gate hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 1.5rem 0;
+}
+footer {
+  color: var(--dim);
+  margin-top: 3rem;
+  font-size: 11px;
+}
+tr.canary td {
+  color: var(--orange);
+}
+.dim {
+  color: var(--dim);
+  font-size: 11px;
+}
+.json,
+.section {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  padding: 0.6rem 1rem;
+  margin: 0.4rem 0 1rem;
+}
+.json ul {
+  list-style: none;
+  padding-left: 2.6rem;
+}
+.json label,
+.route label,
+.chip {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+  cursor: pointer;
+}
+.json .key {
+  color: var(--blue);
+}
+.json .type {
+  color: var(--aqua);
+}
+.punct {
+  color: var(--dim);
+}
+.key-id {
+  padding-left: 1.4rem;
+}
+.json input:checked ~ .key {
+  color: var(--pink);
+  text-decoration: line-through;
+}
+.section legend {
+  color: var(--dim);
+  padding: 0 0.3rem;
+}
+.route {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  align-items: center;
+  padding: 0.15rem 0;
+}
+.route input:checked + .key {
+  color: var(--pink);
+  text-decoration: line-through;
+}
+.chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  color: var(--dim);
+}
+.chip:has(input:checked) {
+  color: var(--pink);
+  text-decoration: line-through;
+}
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  padding: 1rem;
+  margin: 0.75rem 0;
+}
+.card dl {
+  display: grid;
+  grid-template-columns: 9rem 1fr;
+  gap: 0.25rem 1rem;
+}
+.card dt {
+  color: var(--dim);
+}
+.links {
+  display: flex;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+  margin: 0.75rem 0;
+}

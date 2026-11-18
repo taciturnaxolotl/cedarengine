@@ -24,6 +24,7 @@ final class Library {
     nonisolated private static let directoryKey = "directory-v2.json"
     private static let recentsKey = "recents"
     private static let syncedKey = "syncedAt"
+    private static let accessKey = "access"
     private static let recentLimit = 12
 
     init(api: API) {
@@ -54,6 +55,17 @@ final class Library {
         guard !syncing else { return }
         syncing = true
         defer { syncing = false }
+
+        // A narrower role than the one the cache was filled under: drop what it should no longer show.
+        if let access = try? await api.access(), access != UserDefaults.standard.string(forKey: Self.accessKey) {
+            if UserDefaults.standard.string(forKey: Self.accessKey) != nil {
+                Self.wipe()
+                recents = []
+                install([])
+                photos = [:]
+            }
+            UserDefaults.standard.set(access, forKey: Self.accessKey)
+        }
 
         async let photos = try? api.photos()
         async let glossary = try? api.glossary()
@@ -120,6 +132,7 @@ final class Library {
         Disk.clear()
         UserDefaults.standard.removeObject(forKey: recentsKey)
         UserDefaults.standard.removeObject(forKey: syncedKey)
+        UserDefaults.standard.removeObject(forKey: accessKey)
     }
 
     // MARK: Private

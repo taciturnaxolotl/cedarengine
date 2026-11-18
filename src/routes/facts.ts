@@ -92,6 +92,7 @@ export const factRoutes: RouteDef[] = [
   },
   {
     method: "POST",
+    access: "facts:write",
     path: "/v1/people/:id/facts",
     tag: "facts",
     summary: "Assert facts about a person",
@@ -125,6 +126,7 @@ export const factRoutes: RouteDef[] = [
   },
   {
     method: "POST",
+    access: "facts:write",
     path: "/v1/people/:id/facts/retract",
     tag: "facts",
     summary: "Withdraw a fact, by writing down that it is no longer claimed",

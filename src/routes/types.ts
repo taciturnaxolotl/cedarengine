@@ -7,8 +7,13 @@
  * exists is a route that is documented.
  */
 
+import type { Principal } from "../auth/principal";
+import type { Capability } from "../auth/roles";
+
 export interface RouteRequest extends Request {
   params: Record<string, string>;
+  /** Who is asking. Absent only on open routes. */
+  principal?: Principal;
 }
 
 export interface Param {
@@ -25,8 +30,10 @@ export interface RouteDef {
   /** Query-string parameters. Path parameters are read off the path itself. */
   query?: Param[];
   body?: string;
-  /** Skips the bearer check. Only /health does. */
+  /** Skips the bearer check. Only /health and the OAuth metadata do. */
   open?: boolean;
+  /** The capability a caller's role must include. Unset fails closed, as admin. */
+  access?: Capability;
   /**
    * Also accept the token from a `?token=` query parameter, for the one case a
    * browser loads a URL with no chance to set a header: an `<img>` src.

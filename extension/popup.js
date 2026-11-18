@@ -1,7 +1,7 @@
 /**
  * Setup and a live view of the sweep.
  *
- * Paste the URL and the token, press Save. Saving asks for permission to talk
+ * Paste the URL, then sign in with indiko or paste a token, and press Save. Saving asks for permission to talk
  * to whatever host you named, because the engine is usually on localhost or a
  * tunnel and neither can be baked into the manifest. Once a sync is running the
  * panel follows it in real time off the status the background writes to storage.
@@ -196,6 +196,43 @@ const run = (type) => async () => {
   }
 };
 
+async function showAccount() {
+  const account = await send({ type: "account" }).catch(() => ({ signedIn: false }));
+  el("account").textContent = account.signedIn
+    ? `signed in${account.me ? ` as ${account.me}` : ""}`
+    : "";
+  el("signin").textContent = account.signedIn ? "Sign out" : "Sign in with indiko";
+  return account.signedIn;
+}
+
+/** Sign-in talks to the engine and to indiko, so both hosts need permission first. */
+async function toggleSignIn() {
+  if (await showAccount()) {
+    await send({ type: "signOut" });
+    return showAccount();
+  }
+  try {
+    const engineUrl = el("engine").value.trim();
+    await chrome.storage.local.set({ engine: engineUrl });
+    const prm = await fetch(`${engineUrl.replace(/\/$/, "")}/.well-known/oauth-protected-resource`)
+      .then((r) => r.json())
+      .catch(() => null);
+    const origins = [`${new URL(engineUrl).origin}/*`];
+    if (prm?.authorization_servers?.[0])
+      origins.push(`${new URL(prm.authorization_servers[0]).origin}/*`);
+    if (!(await chrome.permissions.request({ origins }))) {
+      throw new Error("sign-in needs permission for the engine and indiko");
+    }
+    await send({ type: "signIn" });
+    await showAccount();
+    render({ phase: "idle" });
+  } catch (error) {
+    render({ phase: "idle", error: error.message });
+  }
+}
+
+el("signin").onclick = toggleSignIn;
+void showAccount();
 el("save").onclick = save;
 el("sync").onclick = run("sync");
 el("directory").onclick = run("directory");

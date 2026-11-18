@@ -374,6 +374,63 @@ CREATE TABLE IF NOT EXISTS requests (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS requests_at ON requests (at);
+
+-- Credentials minted here, for scripts, the CLI and anything without a browser.
+-- Only the sha256 of the token is kept, so a copy of this file opens nothing.
+CREATE TABLE IF NOT EXISTS api_tokens (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  label        TEXT NOT NULL,
+  token_hash   TEXT NOT NULL UNIQUE,
+  role         TEXT NOT NULL,
+  canary       INTEGER NOT NULL DEFAULT 0, -- 1: answers with decoys and logs every hit
+  created_at   TEXT NOT NULL,
+  last_used_at TEXT,
+  revoked_at   TEXT,
+  expires_at   TEXT,
+  -- Personal tokens: minted by a person for themselves, backed by their own
+  -- indiko sign-in so their live role governs every use.
+  owner        TEXT,                 -- indiko sub
+  owner_name   TEXT,
+  refresh_enc  TEXT                  -- that sign-in's refresh token, AES-GCM sealed
+) STRICT;
+
+-- Masks an admin composed, from the fields, routes and filters the engine
+-- knows about. The built-in masks live in code.
+CREATE TABLE IF NOT EXISTS custom_masks (
+  id      TEXT PRIMARY KEY,
+  label   TEXT NOT NULL,
+  fields  TEXT NOT NULL,  -- JSON arrays
+  routes  TEXT NOT NULL,
+  filters TEXT NOT NULL
+) STRICT;
+
+-- Which mask groups each role is denied. Admin is never masked.
+CREATE TABLE IF NOT EXISTS role_masks (
+  role TEXT NOT NULL,
+  mask TEXT NOT NULL,
+  PRIMARY KEY (role, mask)
+) STRICT;
+
+-- Who asked for what. Unlike requests, this keeps the full path and query:
+-- an audit log that cannot say who was looked up is not one.
+CREATE TABLE IF NOT EXISTS audit_log (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  at         TEXT NOT NULL,
+  actor      TEXT NOT NULL,            -- token:<id> | indiko:<sub> | env
+  actor_name TEXT NOT NULL,
+  role       TEXT NOT NULL,
+  client     TEXT,                     -- OAuth client_id, for indiko sign-ins
+  method     TEXT NOT NULL,
+  endpoint   TEXT NOT NULL,            -- route pattern
+  path       TEXT NOT NULL,            -- with the query string
+  status     INTEGER NOT NULL,
+  ip         TEXT,
+  user_agent TEXT,
+  canary     INTEGER NOT NULL DEFAULT 0
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS audit_at ON audit_log (at);
+CREATE INDEX IF NOT EXISTS audit_actor ON audit_log (actor, at);
 `;
 
 let handle: Database | undefined;

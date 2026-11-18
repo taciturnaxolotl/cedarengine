@@ -20,6 +20,7 @@ export class HttpError extends Error {
 
 export const badRequest = (message: string) => new HttpError(400, message);
 export const unauthorized = (message = "bearer token required") => new HttpError(401, message);
+export const forbidden = (message = "not allowed for your role") => new HttpError(403, message);
 export const notFound = (message = "not found") => new HttpError(404, message);
 
 export function errorResponse(error: unknown): Response {

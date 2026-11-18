@@ -15,9 +15,13 @@
  *   bun run engine evaluate                score the model, log the number
  *   bun run engine guess "First Last"      one person, or --all
  *   bun run engine stats
+ *   bun run engine token create "assassins bot" --role editor [--canary]
+ *   bun run engine token list | revoke <id>
  */
 
 import { writeFileSync } from "node:fs";
+import { isRole, ROLES } from "./auth/roles";
+import { createToken, listTokens, revokeToken } from "./auth/tokens";
 import { crawlBook, EDITIONS, type Edition } from "./collect/book";
 import { collectCampus } from "./collect/campus";
 import { sweepDirectory } from "./collect/directory";
@@ -363,6 +367,41 @@ async function main(): Promise<void> {
       return;
     }
 
+    case "token": {
+      const [, action, arg] = positional;
+      if (action === "create") {
+        const role = flag("role", "reader");
+        if (!arg || !isRole(role)) {
+          console.error(
+            `  usage: token create "<label>" --role ${Object.keys(ROLES).join("|")} [--canary]`,
+          );
+          process.exit(1);
+        }
+        const { token, record } = createToken(arg, role, { canary: has("canary") });
+        say("token", record.id);
+        say("role", record.role);
+        if (record.canary) say("canary", "yes");
+        console.error(dim("  shown once; store it now"));
+        console.log(token);
+        return;
+      }
+      if (action === "revoke") {
+        if (!revokeToken(Number(arg))) {
+          console.error("  no live token with that id");
+          process.exit(1);
+        }
+        say("revoked", arg ?? "");
+        return;
+      }
+      for (const t of listTokens()) {
+        const state = t.revokedAt ? "revoked" : t.canary ? "canary" : "live";
+        console.error(
+          `  ${String(t.id).padStart(4)}  ${t.role.padEnd(8)} ${state.padEnd(8)} ${t.label}  ${dim(t.lastUsedAt?.slice(0, 16) ?? "never used")}`,
+        );
+      }
+      return;
+    }
+
     default:
       console.error(
         [
@@ -380,6 +419,7 @@ async function main(): Promise<void> {
           "  evaluate                    score the model",
           '  guess "First Last" | --all  guess a major',
           "  stats                       what the engine holds",
+          "  token create <label> --role mint an API token (list, revoke <id>)",
         ].join("\n"),
       );
       process.exit(1);

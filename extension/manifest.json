@@ -3,7 +3,7 @@
   "name": "cedarengine sync",
   "version": "0.1.0",
   "description": "Keeps a cedarengine database current from the browser you are already signed into.",
-  "permissions": ["storage", "alarms", "scripting", "tabs"],
+  "permissions": ["storage", "alarms", "scripting", "tabs", "identity"],
   "host_permissions": ["https://selfservice.cedarville.edu/*", "https://store.cedarville.edu/*"],
   "optional_host_permissions": ["http://*/*", "https://*/*"],
   "background": { "service_worker": "background.js", "type": "module" },

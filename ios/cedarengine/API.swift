@@ -302,12 +302,14 @@ struct Loose: Decodable, Sendable {
 
 enum APIError: LocalizedError {
     case unauthorized
+    case forbidden
     case notFound
     case status(Int)
 
     var errorDescription: String? {
         switch self {
-        case .unauthorized: "The token was refused."
+        case .unauthorized: "The sign-in was refused."
+        case .forbidden: "Your role cannot see this."
         case .notFound: "Nothing there."
         case .status(let code): "The server answered \(code)."
         }
@@ -321,7 +323,7 @@ struct API: Sendable {
     static let base = URL(string: "https://cedarengine.dunkirk.sh")!
     static let pageSize = 500
 
-    let token: String
+    let auth: Auth
 
     /// The engine's own photo for a person. `AsyncImage` cannot send a header,
     /// so the token rides in the query; the engine takes it either way. Returns
@@ -329,7 +331,7 @@ struct API: Sendable {
     func photoURL(for person: Person) -> URL? {
         guard person.hasPortalPhoto else { return nil }
         var components = URLComponents(url: Self.base.appending(path: "v1/people/\(person.id)/photo"), resolvingAgainstBaseURL: false)!
-        components.queryItems = [URLQueryItem(name: "token", value: token)]
+        components.queryItems = [URLQueryItem(name: "token", value: auth.latest.withLock { $0 })]
         return components.url
     }
 
@@ -352,6 +354,13 @@ struct API: Sendable {
     /// `unauthorized` for a bad token and whatever the network says otherwise.
     func verify() async throws {
         _ = try await search("", limit: 1)
+    }
+
+    /// The role and masks this sign-in carries; when they change, cached answers may show too much.
+    func access() async throws -> String {
+        struct Me: Decodable { let role: String; let masks: [String] }
+        let me: Me = try await get("v1/me", store: false)
+        return ([me.role] + me.masks.sorted()).joined(separator: ",")
     }
 
     func glossary(_ source: Source = .network) async throws -> Glossary {
@@ -431,10 +440,17 @@ struct API: Sendable {
             components.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
         }
         var request = URLRequest(url: components.url!)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-        if code == 401 || code == 403 { throw APIError.unauthorized }
+        request.setValue("Bearer \(try await auth.bearer())", forHTTPHeaderField: "Authorization")
+        var (data, response) = try await URLSession.shared.data(for: request)
+        var code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        // An indiko token can lapse between the expiry check and the server; renew once and retry.
+        if code == 401 {
+            request.setValue("Bearer \(try await auth.bearer(force: true))", forHTTPHeaderField: "Authorization")
+            (data, response) = try await URLSession.shared.data(for: request)
+            code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        }
+        if code == 401 { throw APIError.unauthorized }
+        if code == 403 { throw APIError.forbidden }
         if code == 404 { throw APIError.notFound }
         guard (200..<300).contains(code) else { throw APIError.status(code) }
         let value = try JSONDecoder().decode(T.self, from: data)

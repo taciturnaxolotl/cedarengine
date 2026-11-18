@@ -289,25 +289,34 @@ struct PersonView: View {
         let id = person.id
         if let found = try? await api.person(id, source) { fresh = found }
         let employee = person.isEmployee
-        async let schedule = Result { employee ? nil : try await api.schedule(for: id, source) }
-        async let teaching = Result { try await api.teaching(for: id, source) }
-        async let major = Result { try await api.major(for: id, source) }
-        async let history = Result { try await api.history(for: id, source) }
-        async let facts = Result { try await api.facts(for: id, source) }
-        async let roommates = Result { try await api.roommates(for: id, source) }
+        async let scheduleResult = Result { employee ? nil : try await api.schedule(for: id, source) }
+        async let teachingResult = Result { try await api.teaching(for: id, source) }
+        async let majorResult = Result { try await api.major(for: id, source) }
+        async let historyResult = Result { try await api.history(for: id, source) }
+        async let factsResult = Result { try await api.facts(for: id, source) }
+        async let roommatesResult = Result { try await api.roommates(for: id, source) }
 
-        if case .success(let found) = await schedule {
+        // A 403 means this role may not see the section, so a cached copy must not stay up either.
+        let schedule = await scheduleResult, teaching = await teachingResult, major = await majorResult
+        let history = await historyResult, facts = await factsResult, roommates = await roommatesResult
+
+        if case .success(let found) = schedule {
             if let found, self.schedule == nil { day = ScheduleSection.startingDay(in: found) }
             self.schedule = found
-        }
-        if case .success(let found) = await teaching {
+        } else if Self.hidden(schedule) { self.schedule = nil }
+        if case .success(let found) = teaching {
             if let found, self.teaching == nil { teachingDay = ScheduleSection.startingDay(in: found) }
             self.teaching = found
-        }
-        if case .success(let found) = await major { self.major = found }
-        if case .success(let found) = await history { self.history = found }
-        if case .success(let found) = await facts { self.facts = found }
-        if case .success(let found) = await roommates { self.roommates = found }
+        } else if Self.hidden(teaching) { self.teaching = nil }
+        if case .success(let found) = major { self.major = found } else if Self.hidden(major) { self.major = nil }
+        if case .success(let found) = history { self.history = found } else if Self.hidden(history) { self.history = nil }
+        if case .success(let found) = facts { self.facts = found } else if Self.hidden(facts) { self.facts = [] }
+        if case .success(let found) = roommates { self.roommates = found } else if Self.hidden(roommates) { self.roommates = .none }
+    }
+
+    private static func hidden<T>(_ result: Result<T, any Error>) -> Bool {
+        if case .failure(APIError.forbidden) = result { return true }
+        return false
     }
 }
 

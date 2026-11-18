@@ -27,6 +27,7 @@ export function openapi(routes: RouteDef[], version: string) {
       summary: route.summary,
       tags: [route.tag],
       security: route.open ? [] : [{ bearer: [] }],
+      ...(route.open ? {} : { "x-capability": route.access ?? "admin" }),
       parameters: [
         ...pathParams(route.path),
         ...(route.query ?? []).map((param) => ({
@@ -48,7 +49,12 @@ export function openapi(routes: RouteDef[], version: string) {
         : {}),
       responses: {
         "200": { description: "ok" },
-        ...(route.open ? {} : { "401": { description: "missing or wrong bearer token" } }),
+        ...(route.open
+          ? {}
+          : {
+              "401": { description: "missing, expired or unknown token" },
+              "403": { description: "the token's role lacks this capability, or a mask hides it" },
+            }),
       },
     };
   }

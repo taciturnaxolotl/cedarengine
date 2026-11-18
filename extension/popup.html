@@ -95,7 +95,11 @@
     <p class="sub">fetches what only your browser can reach</p>
 
     <label>engine url<input id="engine" placeholder="http://127.0.0.1:3000" /></label>
-    <label>bearer token<input id="token" type="password" /></label>
+    <div class="row">
+      <button id="signin" type="button" class="ghost">Sign in with indiko</button>
+      <span class="sub" id="account"></span>
+    </div>
+    <label>or a bearer token<input id="token" type="password" /></label>
     <label>term<input id="term" placeholder="2027SP" /></label>
     <label>every N hours<input id="everyHours" type="number" min="1" /></label>
     <div class="check">

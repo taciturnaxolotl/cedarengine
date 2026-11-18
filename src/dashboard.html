@@ -1,252 +1,399 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>cedarengine</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;700&display=swap"
-      rel="stylesheet"
-    />
-    <style>
-      :root {
-        --ink: #ece7df;
-        --dim: #8b8378;
-        --bg: #14120f;
-        --panel: #1c1916;
-        --line: #2b2621;
-        --pink: #ff87d7;
-        --blue: #3987e5;
-        --aqua: #199e70;
-        --violet: #9085e9;
-        --orange: #d95926;
-      }
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body {
-        background: var(--bg);
-        color: var(--ink);
-        font: 13px/1.6 "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
-        padding: 2rem 1.5rem 4rem;
-      }
-      main { max-width: 1080px; margin: 0 auto; }
-      h1 {
-        font-family: "Instrument Serif", Georgia, serif;
-        font-size: 2.75rem;
-        font-weight: 400;
-        letter-spacing: -0.01em;
-      }
-      h1 em { color: var(--pink); font-style: italic; }
-      header p { color: var(--dim); margin-top: 0.25rem; }
-      h2 {
-        font-family: "Instrument Serif", Georgia, serif;
-        font-size: 1.4rem;
-        font-weight: 400;
-        margin: 2.5rem 0 0.2rem;
-      }
-      p.note { color: var(--dim); font-size: 11px; margin-bottom: 0.85rem; }
-      section { border-top: 1px solid var(--line); padding-top: 0.25rem; }
-      .tiles {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-        gap: 1px;
-        background: var(--line);
-        border: 1px solid var(--line);
-        margin-top: 1.5rem;
-      }
-      .tile { background: var(--panel); padding: 0.9rem 1rem; }
-      .tile b { display: block; font-size: 1.7rem; font-weight: 500; letter-spacing: -0.02em; }
-      .tile span { color: var(--dim); font-size: 11px; }
-      .two { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
-      @media (max-width: 860px) { .two { grid-template-columns: 1fr; } }
-      table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
-      th {
-        text-align: left;
-        color: var(--dim);
-        font-weight: 400;
-        font-size: 11px;
-        padding: 0.35rem 0.6rem 0.35rem 0;
-        border-bottom: 1px solid var(--line);
-      }
-      td { padding: 0.28rem 0.6rem 0.28rem 0; border-bottom: 1px solid var(--line); }
-      td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
-      .bar { display: inline-block; height: 9px; border-radius: 0 2px 2px 0; }
-      .wrap { overflow-x: auto; }
-      svg { display: block; width: 100%; height: auto; overflow: visible; }
-      .grid { stroke: var(--line); stroke-width: 1; }
-      .axis { fill: var(--dim); font-size: 9px; font-family: "JetBrains Mono", monospace; }
-      .cell { stroke: var(--bg); stroke-width: 2; }
-      .series { fill: none; stroke-width: 2; }
-      .legend { display: flex; gap: 1rem; flex-wrap: wrap; color: var(--dim); font-size: 11px; }
-      .swatch {
-        display: inline-block;
-        width: 10px;
-        height: 10px;
-        margin-right: 5px;
-        vertical-align: -1px;
-      }
-      #tip {
-        position: fixed;
-        background: var(--panel);
-        border: 1px solid var(--line);
-        padding: 0.35rem 0.55rem;
-        font-size: 11px;
-        pointer-events: none;
-        opacity: 0;
-        transition: opacity 0.1s;
-        z-index: 5;
-        white-space: nowrap;
-      }
-      .gate { max-width: 460px; margin: 4rem auto; }
-      input {
-        width: 100%;
-        background: var(--panel);
-        border: 1px solid var(--line);
-        color: var(--ink);
-        font: inherit;
-        padding: 0.6rem 0.7rem;
-        margin: 0.75rem 0;
-      }
-      button {
-        background: var(--pink);
-        color: #14120f;
-        border: 0;
-        font: inherit;
-        font-weight: 700;
-        padding: 0.5rem 1.1rem;
-        cursor: pointer;
-      }
-      button.link { background: none; color: var(--blue); padding: 0; font-weight: 400; }
-      .row { display: flex; gap: 0.5rem; align-items: center; }
-      .err { color: var(--pink); }
-      a { color: var(--blue); }
-      footer { color: var(--dim); margin-top: 3rem; font-size: 11px; }
-    </style>
-  </head>
-  <body>
-    <main id="app">
-      <header>
-        <h1>cedar<em>engine</em></h1>
-        <p>the directory, the catalog, the book, the booklists and the campus, in one place</p>
-      </header>
-      <div id="body"></div>
-      <footer>
-        <span id="foot"></span> ·
-        <a href="/map">campus map</a> ·
-        <a href="/openapi.json">openapi.json</a> ·
-        <button type="button" id="forget" class="link">forget token</button>
-      </footer>
-    </main>
-    <div id="tip"></div>
 
-    <script type="module">
-      const KEY = "cedarengine.token";
-      const el = document.getElementById("body");
-      const foot = document.getElementById("foot");
-      const tip = document.getElementById("tip");
-      const n = (v) => Math.round(v ?? 0).toLocaleString("en-US");
-      const pct = (v) => `${Math.round((v ?? 0) * 100)}%`;
-      const esc = (text) =>
-        String(text ?? "").replace(/[<>&"]/g, (c) => `&#${c.charCodeAt(0)};`);
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>cedarengine</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;700&display=swap"
+    rel="stylesheet" />
+  <style>
+    :root {
+      --ink: #ece7df;
+      --dim: #8b8378;
+      --bg: #14120f;
+      --panel: #1c1916;
+      --line: #2b2621;
+      --pink: #ff87d7;
+      --blue: #3987e5;
+      --aqua: #199e70;
+      --violet: #9085e9;
+      --orange: #d95926;
+    }
 
-      const api = async (path) => {
-        const res = await fetch(path, {
-          headers: { authorization: `Bearer ${localStorage.getItem(KEY) ?? ""}` },
-        });
-        if (res.status === 401) throw new Error("unauthorised");
-        if (!res.ok) throw new Error(`${path} returned ${res.status}`);
-        return res.json();
-      };
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
 
-      // Categorical hues, checked against this background rather than picked by
-      // eye — the same six the map uses, in the same order.
-      const SERIES = ["#3987e5", "#199e70", "#c98500", "#d55181", "#9085e9", "#d95926"];
-      const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font: 13px/1.6 "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+      padding: 2rem 1.5rem 4rem;
+    }
 
-      /** One hue, dark to bright: this is magnitude, so lightness carries it. */
-      const ramp = (t) => {
-        const from = [34, 30, 25];
-        const to = [255, 135, 215];
-        return `rgb(${from.map((c, i) => Math.round(c + (to[i] - c) * t ** 0.7)).join(",")})`;
-      };
+    main {
+      max-width: 1080px;
+      margin: 0 auto;
+    }
 
-      // One tooltip, shared by every chart on the page.
-      document.addEventListener("mousemove", (event) => {
-        const label = event.target?.dataset?.tip;
-        if (!label) {
-          tip.style.opacity = 0;
-          return;
-        }
-        tip.textContent = label;
-        tip.style.opacity = 1;
-        tip.style.left = `${Math.min(event.clientX + 14, window.innerWidth - tip.offsetWidth - 8)}px`;
-        tip.style.top = `${event.clientY + 16}px`;
+    h1 {
+      font-family: "Instrument Serif", Georgia, serif;
+      font-size: 2.75rem;
+      font-weight: 400;
+      letter-spacing: -0.01em;
+    }
+
+    h1 em {
+      color: var(--pink);
+      font-style: italic;
+    }
+
+    header p {
+      color: var(--dim);
+      margin-top: 0.25rem;
+    }
+
+    h2 {
+      font-family: "Instrument Serif", Georgia, serif;
+      font-size: 1.4rem;
+      font-weight: 400;
+      margin: 2.5rem 0 0.2rem;
+    }
+
+    p.note {
+      color: var(--dim);
+      font-size: 11px;
+      margin-bottom: 0.85rem;
+    }
+
+    section {
+      border-top: 1px solid var(--line);
+      padding-top: 0.25rem;
+    }
+
+    .tiles {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 1px;
+      background: var(--line);
+      border: 1px solid var(--line);
+      margin-top: 1.5rem;
+    }
+
+    .tile {
+      background: var(--panel);
+      padding: 0.9rem 1rem;
+    }
+
+    .tile b {
+      display: block;
+      font-size: 1.7rem;
+      font-weight: 500;
+      letter-spacing: -0.02em;
+    }
+
+    .tile span {
+      color: var(--dim);
+      font-size: 11px;
+    }
+
+    .two {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2rem;
+    }
+
+    @media (max-width: 860px) {
+      .two {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 0.5rem;
+    }
+
+    th {
+      text-align: left;
+      color: var(--dim);
+      font-weight: 400;
+      font-size: 11px;
+      padding: 0.35rem 0.6rem 0.35rem 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    td {
+      padding: 0.28rem 0.6rem 0.28rem 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    td.n,
+    th.n {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .bar {
+      display: inline-block;
+      height: 9px;
+      border-radius: 0 2px 2px 0;
+    }
+
+    .wrap {
+      overflow-x: auto;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      overflow: visible;
+    }
+
+    .grid {
+      stroke: var(--line);
+      stroke-width: 1;
+    }
+
+    .axis {
+      fill: var(--dim);
+      font-size: 9px;
+      font-family: "JetBrains Mono", monospace;
+    }
+
+    .cell {
+      stroke: var(--bg);
+      stroke-width: 2;
+    }
+
+    .series {
+      fill: none;
+      stroke-width: 2;
+    }
+
+    .legend {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      color: var(--dim);
+      font-size: 11px;
+    }
+
+    .swatch {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      margin-right: 5px;
+      vertical-align: -1px;
+    }
+
+    #tip {
+      position: fixed;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 0.35rem 0.55rem;
+      font-size: 11px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.1s;
+      z-index: 5;
+      white-space: nowrap;
+    }
+
+    .gate {
+      max-width: 460px;
+      margin: 4rem auto;
+    }
+
+    input {
+      width: 100%;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      color: var(--ink);
+      font: inherit;
+      padding: 0.6rem 0.7rem;
+      margin: 0.75rem 0;
+    }
+
+    button {
+      background: var(--pink);
+      color: #14120f;
+      border: 0;
+      font: inherit;
+      font-weight: 700;
+      padding: 0.5rem 1.1rem;
+      cursor: pointer;
+    }
+
+    button.link {
+      background: none;
+      color: var(--blue);
+      padding: 0;
+      font-weight: 400;
+    }
+
+    .row {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
+
+    .err {
+      color: var(--pink);
+    }
+
+    a {
+      color: var(--blue);
+    }
+
+    footer {
+      color: var(--dim);
+      margin-top: 3rem;
+      font-size: 11px;
+    }
+  </style>
+</head>
+
+<body>
+  <main id="app">
+    <header>
+      <h1>cedar<em>engine</em></h1>
+      <p>fancy stats</p>
+    </header>
+    <div id="body"></div>
+    <footer>
+      <span id="foot"></span> ·
+      <a href="/map">campus map</a> ·
+      <a href="/openapi.json">openapi.json</a> ·
+      <a href="/account">account</a> ·
+      <button type="button" id="forget" class="link">sign out</button>
+    </footer>
+  </main>
+  <div id="tip"></div>
+
+  <script type="module">
+    // The session /account keeps; an old pasted token is still honoured.
+    const token = () => {
+      const stored = JSON.parse(localStorage.getItem("cedarengine.session") ?? "null");
+      if (stored && (!stored.expiresAt || stored.expiresAt > Date.now())) return stored.token;
+      return localStorage.getItem("cedarengine.token");
+    };
+    const el = document.getElementById("body");
+    const foot = document.getElementById("foot");
+    const tip = document.getElementById("tip");
+    const n = (v) => Math.round(v ?? 0).toLocaleString("en-US");
+    const pct = (v) => `${Math.round((v ?? 0) * 100)}%`;
+    const esc = (text) =>
+      String(text ?? "").replace(/[<>&"]/g, (c) => `&#${c.charCodeAt(0)};`);
+
+    const api = async (path) => {
+      const res = await fetch(path, {
+        headers: {authorization: `Bearer ${token() ?? ""}`},
       });
+      if (res.status === 401) {
+        const reason = (await res.json().catch(() => ({}))).error;
+        throw Object.assign(new Error(reason ?? "refused"), { signedOut: true });
+      }
+      if (!res.ok) throw new Error(`${path} returned ${res.status}`);
+      return res.json();
+    };
 
-      /** Horizontal bars: ranked magnitude, with names too long for an x-axis. */
-      const bars = (rows, { ink = "var(--pink)", unit = "" } = {}) => {
-        const most = Math.max(1, ...rows.map((row) => row.value));
-        return `<div class="wrap"><table>${rows
-          .map(
-            (row) => `<tr>
+    // Categorical hues, checked against this background rather than picked by
+    // eye — the same six the map uses, in the same order.
+    const SERIES = ["#3987e5", "#199e70", "#c98500", "#d55181", "#9085e9", "#d95926"];
+    const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+    /** One hue, dark to bright: this is magnitude, so lightness carries it. */
+    const ramp = (t) => {
+      const from = [34, 30, 25];
+      const to = [255, 135, 215];
+      return `rgb(${from.map((c, i) => Math.round(c + (to[i] - c) * t ** 0.7)).join(",")})`;
+    };
+
+    // One tooltip, shared by every chart on the page.
+    document.addEventListener("mousemove", (event) => {
+      const label = event.target?.dataset?.tip;
+      if (!label) {
+        tip.style.opacity = 0;
+        return;
+      }
+      tip.textContent = label;
+      tip.style.opacity = 1;
+      tip.style.left = `${Math.min(event.clientX + 14, window.innerWidth - tip.offsetWidth - 8)}px`;
+      tip.style.top = `${event.clientY + 16}px`;
+    });
+
+    /** Horizontal bars: ranked magnitude, with names too long for an x-axis. */
+    const bars = (rows, {ink = "var(--pink)", unit = ""} = {}) => {
+      const most = Math.max(1, ...rows.map((row) => row.value));
+      return `<div class="wrap"><table>${rows
+        .map(
+          (row) => `<tr>
               <td>${esc(row.label)}</td>
               <td class="n">${n(row.value)}</td>
               <td style="width:56%"><i class="bar"
                 data-tip="${esc(`${row.label}: ${n(row.value)}${unit}`)}"
                 style="width:${(row.value / most) * 100}%;background:${ink}"></i></td>
             </tr>`,
-          )
-          .join("")}</table></div>`;
-      };
+        )
+        .join("")}</table></div>`;
+    };
 
-      /**
-       * Weekday × hour, shaded by how many seats are in a room that hour.
-       *
-       * A heatmap because the question is two-dimensional: not "how busy is
-       * Tuesday" but "when on Tuesday".
-       */
-      function heatmap(cells) {
-        const hours = [...new Set(cells.map((c) => c.hour))].sort((a, b) => a - b);
-        const days = [1, 2, 3, 4, 5];
-        const most = Math.max(1, ...cells.map((c) => c.seats));
-        const at = new Map(cells.map((c) => [`${c.day}:${c.hour}`, c]));
-        const w = 34;
-        const h = 26;
-        const left = 34;
-        const top = 16;
+    /**
+     * Weekday × hour, shaded by how many seats are in a room that hour.
+     *
+     * A heatmap because the question is two-dimensional: not "how busy is
+     * Tuesday" but "when on Tuesday".
+     */
+    function heatmap(cells) {
+      const hours = [...new Set(cells.map((c) => c.hour))].sort((a, b) => a - b);
+      const days = [1, 2, 3, 4, 5];
+      const most = Math.max(1, ...cells.map((c) => c.seats));
+      const at = new Map(cells.map((c) => [`${c.day}:${c.hour}`, c]));
+      const w = 34;
+      const h = 26;
+      const left = 34;
+      const top = 16;
 
-        const grid = days
-          .flatMap((day, row) =>
-            hours.map((hour, col) => {
-              const cell = at.get(`${day}:${hour}`);
-              const seats = cell?.seats ?? 0;
-              const clock = `${hour % 12 || 12}${hour < 12 ? "am" : "pm"}`;
-              const label = `${DAYS[day]} ${clock} · ${n(seats)} seated · ${n(
-                cell?.sections ?? 0,
-              )} sections`;
-              return `<rect class="cell" x="${left + col * w}" y="${top + row * h}" width="${w}"
+      const grid = days
+        .flatMap((day, row) =>
+          hours.map((hour, col) => {
+            const cell = at.get(`${day}:${hour}`);
+            const seats = cell?.seats ?? 0;
+            const clock = `${hour % 12 || 12}${hour < 12 ? "am" : "pm"}`;
+            const label = `${DAYS[day]} ${clock} · ${n(seats)} seated · ${n(
+              cell?.sections ?? 0,
+            )} sections`;
+            return `<rect class="cell" x="${left + col * w}" y="${top + row * h}" width="${w}"
                 height="${h}" rx="2" fill="${ramp(seats / most)}" data-tip="${esc(label)}"></rect>`;
-            }),
-          )
-          .join("");
+          }),
+        )
+        .join("");
 
-        const hourLabels = hours
-          .map(
-            (hour, col) =>
-              `<text class="axis" x="${left + col * w + w / 2}" y="${top - 5}"
+      const hourLabels = hours
+        .map(
+          (hour, col) =>
+            `<text class="axis" x="${left + col * w + w / 2}" y="${top - 5}"
                  text-anchor="middle">${hour % 12 || 12}</text>`,
-          )
-          .join("");
-        const dayLabels = days
-          .map(
-            (day, row) =>
-              `<text class="axis" x="${left - 8}" y="${top + row * h + h / 2 + 3}"
+        )
+        .join("");
+      const dayLabels = days
+        .map(
+          (day, row) =>
+            `<text class="axis" x="${left - 8}" y="${top + row * h + h / 2 + 3}"
                  text-anchor="end">${DAYS[day]}</text>`,
-          )
-          .join("");
+        )
+        .join("");
 
-        return `<svg viewBox="0 0 ${left + hours.length * w + 10} ${top + days.length * h + 10}">
+      return `<svg viewBox="0 0 ${left + hours.length * w + 10} ${top + days.length * h + 10}">
             ${hourLabels}${dayLabels}${grid}
           </svg>
           <div class="legend" style="margin-top:0.6rem">
@@ -254,31 +401,31 @@
             <span><i class="swatch" style="background:${ramp(0.5)}"></i>${n(most / 2)}</span>
             <span><i class="swatch" style="background:${ramp(1)}"></i>${n(most)} seated</span>
           </div>`;
+    }
+
+    /** Lines over time. One scale only — two would make the crossing a lie. */
+    function lines(points, series, {format = n, height = 150} = {}) {
+      if (points.length < 2) {
+        return `<p class="note">not enough points to plot yet</p>`;
       }
+      const w = 1000;
+      const pad = {left: 46, right: 12, top: 12, bottom: 22};
+      const most = Math.max(...series.flatMap((s) => points.map((p) => s.of(p)))) || 1;
+      const x = (i) => pad.left + (i / (points.length - 1)) * (w - pad.left - pad.right);
+      const y = (v) => height - pad.bottom - (v / most) * (height - pad.top - pad.bottom);
 
-      /** Lines over time. One scale only — two would make the crossing a lie. */
-      function lines(points, series, { format = n, height = 150 } = {}) {
-        if (points.length < 2) {
-          return `<p class="note">not enough points to plot yet</p>`;
-        }
-        const w = 1000;
-        const pad = { left: 46, right: 12, top: 12, bottom: 22 };
-        const most = Math.max(...series.flatMap((s) => points.map((p) => s.of(p)))) || 1;
-        const x = (i) => pad.left + (i / (points.length - 1)) * (w - pad.left - pad.right);
-        const y = (v) => height - pad.bottom - (v / most) * (height - pad.top - pad.bottom);
-
-        const grid = [0, 0.5, 1]
-          .map(
-            (t) => `<line class="grid" x1="${pad.left}" x2="${w - pad.right}" y1="${y(most * t)}"
+      const grid = [0, 0.5, 1]
+        .map(
+          (t) => `<line class="grid" x1="${pad.left}" x2="${w - pad.right}" y1="${y(most * t)}"
                 y2="${y(most * t)}" />
               <text class="axis" x="${pad.left - 8}" y="${y(most * t) + 3}"
                 text-anchor="end">${format(most * t)}</text>`,
-          )
-          .join("");
+        )
+        .join("");
 
-        const plotted = series
-          .map(
-            (s, i) => `<path class="series" stroke="${SERIES[i]}"
+      const plotted = series
+        .map(
+          (s, i) => `<path class="series" stroke="${SERIES[i]}"
               d="${points.map((p, j) => `${j ? "L" : "M"}${x(j)} ${y(s.of(p))}`).join("")}" />
             ${points
               .map(
@@ -287,108 +434,95 @@
                   data-tip="${esc(`${s.name} · ${p.label} · ${format(s.of(p))}`)}" />`,
               )
               .join("")}`,
-          )
-          .join("");
+        )
+        .join("");
 
-        const ticks = points
-          .map((p, j) =>
-            j === 0 || j === points.length - 1 || points.length < 8
-              ? `<text class="axis" x="${x(j)}" y="${height - 6}"
+      const ticks = points
+        .map((p, j) =>
+          j === 0 || j === points.length - 1 || points.length < 8
+            ? `<text class="axis" x="${x(j)}" y="${height - 6}"
                    text-anchor="middle">${esc(p.label)}</text>`
-              : "",
-          )
-          .join("");
+            : "",
+        )
+        .join("");
 
-        return `<svg viewBox="0 0 ${w} ${height}">${grid}${plotted}${ticks}</svg>
+      return `<svg viewBox="0 0 ${w} ${height}">${grid}${plotted}${ticks}</svg>
           <div class="legend" style="margin-top:0.5rem">${series
-            .map(
-              (s, i) =>
-                `<span><i class="swatch" style="background:${SERIES[i]}"></i>${esc(s.name)}</span>`,
-            )
-            .join("")}</div>`;
-      }
+          .map(
+            (s, i) =>
+              `<span><i class="swatch" style="background:${SERIES[i]}"></i>${esc(s.name)}</span>`,
+          )
+          .join("")}</div>`;
+    }
 
-      function gate(message = "") {
-        el.innerHTML = `<div class="gate">
-          <p>This engine holds real people's rooms and phone numbers. Paste the bearer token from your <code>.env</code>.</p>
-          <input id="token" type="password" placeholder="BEARER_TOKEN" autofocus />
-          <div class="row"><button id="go">Unlock</button><span class="err">${esc(message)}</span></div>
+    function gate(message = "") {
+      el.innerHTML = `<div class="gate">
+          <div class="row"><a href="/account?next=/"><button type="button">Sign in</button></a><span class="err">${esc(message)}</span></div>
         </div>`;
-        const submit = () => {
-          localStorage.setItem(KEY, document.getElementById("token").value.trim());
-          load();
-        };
-        document.getElementById("go").onclick = submit;
-        // Braces matter: an arrow body returning false from onkeydown cancels the
-        // keystroke, and `e.key === "Enter" && submit()` is false for every other
-        // key — which is a token box you cannot type into.
-        document.getElementById("token").onkeydown = (event) => {
-          if (event.key === "Enter") submit();
-        };
-      }
+    }
 
-      const tile = (label, value) => `<div class="tile"><b>${value}</b><span>${label}</span></div>`;
-      const fill = (id, html) => {
-        const node = document.getElementById(id);
-        if (node) node.innerHTML = html;
-      };
+    const tile = (label, value) => `<div class="tile"><b>${value}</b><span>${label}</span></div>`;
+    const fill = (id, html) => {
+      const node = document.getElementById(id);
+      if (node) node.innerHTML = html;
+    };
 
-      const timetableView = (data) => `
+    const timetableView = (data) => `
         ${heatmap(data.cells)}
         <h2>the fullest subjects</h2>
         <p class="note">seats taken this term, by subject code</p>
         ${bars(
-          data.subjects.slice(0, 12).map((s) => ({ label: s.subject, value: s.enrolled })),
-          { ink: "var(--aqua)", unit: " enrolled" },
-        )}`;
+      data.subjects.slice(0, 12).map((s) => ({label: s.subject, value: s.enrolled})),
+      {ink: "var(--aqua)", unit: " enrolled"},
+    )}`;
 
-      const walksView = (data) => `
+    const walksView = (data) => `
         <p class="note">${n(data.students)} students with both a dorm and a booklist ·
           ${n(data.trips)} journeys · the busiest path carries ${n(data.busiest)}</p>
         ${bars(
-          data.destinations.slice(0, 10).map((d) => ({ label: d.label, value: d.trips })),
-          { ink: "var(--orange)", unit: " walks" },
-        )}`;
+      data.destinations.slice(0, 10).map((d) => ({label: d.label, value: d.trips})),
+      {ink: "var(--orange)", unit: " walks"},
+    )}`;
 
-      const studyView = (data) => `
+    const studyView = (data) => `
         <p class="note">top guess for the ${n(data.confident)} students whose booklist carries
           enough signal to be worth counting, of ${n(data.students)} with any</p>
         ${bars(
-          data.schools.map((s) => ({ label: s.school, value: s.students })),
-          { ink: "var(--violet)", unit: " students" },
-        )}`;
+      data.schools.map((s) => ({label: s.school, value: s.students})),
+      {ink: "var(--violet)", unit: " students"},
+    )}`;
 
-      async function load() {
-        try {
-          const [stats, traffic, glossary] = await Promise.all([
-            api("/v1/stats"),
-            api("/v1/analytics"),
-            api("/v1/glossary"),
-          ]);
-          render(stats, traffic, glossary);
+    async function load() {
+      try {
+        const [stats, traffic, glossary] = await Promise.all([
+          api("/v1/stats"),
+          api("/v1/analytics"),
+          api("/v1/glossary"),
+        ]);
+        render(stats, traffic, glossary);
 
-          // The expensive half, filled in as it lands: a term's timetable,
-          // everyone's major guessed, every walk to class routed. The page is
-          // worth reading before any of it arrives.
-          const term = stats.booklists.at(-1)?.term ?? stats.catalog.terms[0]?.term;
-          if (term) {
-            api(`/v1/timetable?term=${term}`).then((data) => fill("timetable", timetableView(data)));
-          }
-          api("/v1/campus/traffic").then((data) => fill("walks", walksView(data)));
-          api("/v1/majors/distribution").then((data) => fill("study", studyView(data)));
-        } catch (error) {
-          if (error.message === "unauthorised") gate("that token was not it");
-          else el.innerHTML = `<p class="err">${esc(error.message)}</p>`;
+        // The expensive half, filled in as it lands: a term's timetable,
+        // everyone's major guessed, every walk to class routed. The page is
+        // worth reading before any of it arrives.
+        const term = stats.booklists.at(-1)?.term ?? stats.catalog.terms[0]?.term;
+        if (term) {
+          api(`/v1/timetable?term=${term}`).then((data) => fill("timetable", timetableView(data)));
         }
+        api("/v1/campus/traffic").then((data) => fill("walks", walksView(data)));
+        api("/v1/majors/distribution").then((data) => fill("study", studyView(data)));
+      } catch (error) {
+        if (error.signedOut) gate(error.message);
+        else el.innerHTML = `<p class="err">${esc(error.message)}</p>`;
       }
+    }
 
-      function render(stats, traffic, glossary) {
-        const className = (code) => glossary.classes[code] ?? code;
-        const sections = stats.catalog.terms.reduce((sum, t) => sum + t.sections, 0);
-        const courses = stats.catalog.terms.reduce((sum, t) => sum + t.courses, 0);
-        const booklists = stats.booklists.reduce((sum, t) => sum + t.students, 0);
+    function render(stats, traffic, glossary) {
+      const className = (code) => glossary.classes[code] ?? code;
+      const sections = stats.catalog.terms.reduce((sum, t) => sum + t.sections, 0);
+      const courses = stats.catalog.terms.reduce((sum, t) => sum + t.courses, 0);
+      const booklists = stats.booklists.reduce((sum, t) => sum + t.students, 0);
 
-        el.innerHTML = `
+      el.innerHTML = `
           <div class="tiles">
             ${tile("people", n(stats.people.people))}
             ${tile("students", n(stats.people.students))}
@@ -417,14 +551,14 @@
           <div class="two">
             <section><h2>dorms</h2>
               <p class="note">people the directory lists in each hall</p>
-              ${bars(stats.people.byDorm.slice(0, 16).map((d) => ({ label: d.key, value: d.n })))}
+              ${bars(stats.people.byDorm.slice(0, 16).map((d) => ({label: d.key, value: d.n})))}
             </section>
             <section><h2>classes</h2>
               <p class="note">everybody the directory gives a class year</p>
               ${bars(
-                stats.people.byClass.map((c) => ({ label: className(c.key), value: c.n })),
-                { ink: "var(--blue)" },
-              )}
+        stats.people.byClass.map((c) => ({label: className(c.key), value: c.n})),
+        {ink: "var(--blue)"},
+      )}
             </section>
           </div>
 
@@ -432,36 +566,36 @@
             <p class="note">accuracy against known majors, logged on every evaluation —
               the climb is the whole point of collecting another term</p>
             ${lines(
-              stats.metrics.map((m) => ({ ...m, label: `${m.terms} · ${m.source}` })),
-              [
-                { name: "exact", of: (m) => m.exact },
-                { name: "top 3", of: (m) => m.top3 },
-                { name: "same school", of: (m) => m.cluster },
-              ],
-              { format: pct },
-            )}
+        stats.metrics.map((m) => ({...m, label: `${m.terms} · ${m.source}`})),
+        [
+          {name: "exact", of: (m) => m.exact},
+          {name: "top 3", of: (m) => m.top3},
+          {name: "same school", of: (m) => m.cluster},
+        ],
+        {format: pct},
+      )}
           </section>
 
           <div class="two">
             <section><h2>population over time</h2>
               <p class="note">the standing headcount, month by month</p>
               ${lines(
-                (() => {
-                  let standing = 0;
-                  return stats.population.map((m) => {
-                    standing += m.appeared - m.vanished;
-                    return { label: m.month, standing };
-                  });
-                })(),
-                [{ name: "population", of: (m) => m.standing }],
-              )}
+        (() => {
+          let standing = 0;
+          return stats.population.map((m) => {
+            standing += m.appeared - m.vanished;
+            return {label: m.month, standing};
+          });
+        })(),
+        [{name: "population", of: (m) => m.standing}],
+      )}
             </section>
             <section><h2>requests here</h2>
               <p class="note">calls to this engine over the last day</p>
               ${lines(
-                traffic.overTime.map((h) => ({ ...h, label: `${h.hour.slice(11)}:00` })),
-                [{ name: "requests", of: (h) => h.n }],
-              )}
+        traffic.overTime.map((h) => ({...h, label: `${h.hour.slice(11)}:00`})),
+        [{name: "requests", of: (h) => h.n}],
+      )}
             </section>
           </div>
 
@@ -471,28 +605,30 @@
               <tr><th>when</th><th>what</th><th>by</th><th class="n">seen</th><th class="n">new</th>
                 <th class="n">changed</th><th class="n">left</th><th>complete</th></tr>
               ${stats.sweeps
-                .map(
-                  (s) => `<tr><td>${s.startedAt.slice(0, 16).replace("T", " ")}</td><td>${s.kind}</td>
+          .map(
+            (s) => `<tr><td>${s.startedAt.slice(0, 16).replace("T", " ")}</td><td>${s.kind}</td>
                     <td>${s.source}</td><td class="n">${n(s.seen)}</td><td class="n">${n(s.added)}</td>
                     <td class="n">${n(s.changed)}</td><td class="n">${n(s.vanished)}</td>
                     <td>${s.complete ? "yes" : s.finishedAt ? "partial" : "running"}</td></tr>`,
-                )
-                .join("")}
+          )
+          .join("")}
             </table></div>
           </section>`;
 
-        foot.textContent =
-          `${n(traffic.total)} requests in 24h · p50 ${traffic.p50}ms · ` +
-          `p95 ${traffic.p95}ms · ${traffic.errors} errors`;
-      }
+      foot.textContent =
+        `${n(traffic.total)} requests in 24h · p50 ${traffic.p50}ms · ` +
+        `p95 ${traffic.p95}ms · ${traffic.errors} errors`;
+    }
 
-      document.getElementById("forget").onclick = () => {
-        localStorage.removeItem(KEY);
-        gate("");
-      };
+    document.getElementById("forget").onclick = () => {
+      localStorage.removeItem("cedarengine.session");
+      localStorage.removeItem("cedarengine.token");
+      gate("");
+    };
 
-      if (localStorage.getItem(KEY)) load();
-      else gate("");
-    </script>
-  </body>
+    if (token()) load();
+    else gate("");
+  </script>
+</body>
+
 </html>
