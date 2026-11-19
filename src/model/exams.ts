@@ -197,10 +197,26 @@ export function examsForSections(term: string, names: string[]): Exam[] | null {
  */
 export function examsFor(personId: string, term?: string): ExamWeek | { missing: string } | null {
   const student = scheduleFor(personId, term);
-  const teaching = student ? null : teachingFor(personId, term);
-  const source = student ?? teaching;
+  const source = student ?? teachingFor(personId, term);
   if (!source) return null;
+  return examWeekFor(personId, student ? "student" : "instructor", {
+    ...source,
+    unmatched: student?.unmatched ?? [],
+  });
+}
 
+/** Finals for an explicit list of sections, so a generated week can be examined the same way a real one is. */
+export function examWeekFor(
+  personId: string,
+  role: "student" | "instructor",
+  source: {
+    name: string | null;
+    term: string;
+    sections: ScheduledSection[];
+    online: ScheduledSection[];
+    unmatched: string[];
+  },
+): ExamWeek | { missing: string } {
   const schedule = examSchedule(source.term);
   if (!schedule) return { missing: source.term };
 
@@ -209,12 +225,12 @@ export function examsFor(personId: string, term?: string): ExamWeek | { missing:
   return {
     personId,
     name: source.name,
-    role: student ? "student" : "instructor",
+    role,
     term: source.term,
     exams,
     unscheduled: all.filter((e) => e.rule === "none"),
     conflicts: conflictsOf(exams),
-    unmatched: student?.unmatched ?? [],
+    unmatched: source.unmatched,
     note: schedule.note,
   };
 }

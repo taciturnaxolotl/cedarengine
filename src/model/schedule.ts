@@ -142,7 +142,8 @@ const creditsOf = (section: SectionRow): number | null => {
 };
 
 /** A section is online when nothing about it has a day and an hour. */
-const meetsInPerson = (meetings: Meeting[]): boolean =>
+/** Exported for generated schedules, which are built from the same rules as real ones. */
+export const meetsInPerson = (meetings: Meeting[]): boolean =>
   meetings.some((meeting) => !meeting.online && meeting.days.length && meeting.start);
 
 /** Sections laid out by weekday, each day's blocks in order. */

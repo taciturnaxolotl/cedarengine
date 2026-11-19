@@ -10,11 +10,13 @@
 import type { Server } from "bun";
 import { audit } from "../auth/audit";
 import { decoyResponse } from "../auth/decoy";
+import { greyballLevelFor, greyballResponse, obscurePayload } from "../auth/greyball";
 import { forbiddenFilter, policyFor, stripFields } from "../auth/masks";
 import { authenticate, type Principal, presentedToken } from "../auth/principal";
 import { can } from "../auth/roles";
 import { config } from "../config";
 import type { RouteDef, RouteRequest } from "../routes/types";
+import { anyGreyball, greyballLevels } from "../store/greyball";
 import { record } from "./analytics";
 import { errorResponse, forbidden, unauthorized } from "./http";
 
@@ -40,15 +42,23 @@ async function answer(
   if (filter) throw forbidden(`filtering by ${filter} is hidden for your role`);
 
   request.principal = principal;
-  const decoy =
-    principal.canary && route.access === "people"
-      ? decoyResponse(route.path, url, request.params ?? {})
-      : null;
-  const response = decoy ?? (await route.handler(request, url));
+  // A greyballed caller sees invented answers: the whole directory at level 2,
+  // exactly like a canary, or only the timetables at level 1. One lookup says
+  // whether the feature is in play at all; when it is not, the answer below
+  // passes through untouched the way it always did.
+  const greyballed = !principal.canary && route.access === "people" && anyGreyball();
+  const level = greyballed ? greyballLevelFor(principal, greyballLevels()) : null;
+  const invented = (principal.canary || level === 2) && route.access === "people";
+  const response =
+    (invented ? decoyResponse(route.path, url, request.params ?? {}) : null) ??
+    (level === 1 ? greyballResponse(route.path, url, request.params ?? {}) : null) ??
+    (await route.handler(request, url));
 
   const isJson = response.headers.get("content-type")?.startsWith("application/json");
-  if (policy.fields.size === 0 || !isJson) return response;
-  const masked = stripFields(await response.json(), policy.fields);
+  if (!isJson) return response;
+  if (level !== 1 && policy.fields.size === 0) return response;
+  const body = obscurePayload(route.path, await response.json(), level);
+  const masked = policy.fields.size === 0 ? body : stripFields(body, policy.fields);
   return new Response(JSON.stringify(masked), {
     status: response.status,
     headers: response.headers,

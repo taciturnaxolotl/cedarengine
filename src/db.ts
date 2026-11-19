@@ -327,6 +327,18 @@ FROM (
 )
 WHERE rn = 1 AND retracted = 0;
 
+-- Who is greyballed, and how hard: the actor a request authenticates as, not
+-- the person it asks about. Level 1 answers that caller with plausible
+-- timetables instead of real ones, keeping everything else true. Level 2 is
+-- the canary treatment, invented people everywhere. An actor is "env",
+-- "token:<id>" or "indiko:<sub>", the same string the audit log records.
+CREATE TABLE IF NOT EXISTS greyball (
+  actor      TEXT PRIMARY KEY,
+  level      INTEGER NOT NULL CHECK (level IN (1, 2)),
+  note       TEXT,
+  updated_at TEXT NOT NULL
+) STRICT;
+
 CREATE TABLE IF NOT EXISTS metrics (
   at       TEXT NOT NULL,
   source   TEXT NOT NULL,
@@ -466,6 +478,18 @@ function migrate(database: Database): void {
   // Really deleted, log and all: a tombstone would still be storing it.
   const refused = database.query("DELETE FROM person_facts WHERE key = ?");
   for (const key of REFUSED_FACT_KEYS) refused.run(key);
+
+  // Greyball was briefly keyed by the person being asked about; it keys on the
+  // caller now, so an old table holds rows under the wrong meaning. Dropped
+  // rather than carried across: the list is short and rebuilt by hand.
+  const greyball = database
+    .query<{ name: string }, []>("PRAGMA table_info(greyball)")
+    .all()
+    .map((column) => column.name);
+  if (greyball.includes("student_id")) {
+    database.exec("DROP TABLE greyball");
+    database.exec(SCHEMA);
+  }
 
   const columns = database
     .query<{ name: string; pk: number }, []>("PRAGMA table_info(programs)")

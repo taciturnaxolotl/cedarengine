@@ -25,6 +25,7 @@ import { CAPABILITIES, isRole, ROLES, type Role } from "../auth/roles";
 import { createToken, listTokens, revokeToken, sealedRefresh } from "../auth/tokens";
 import { config } from "../config";
 import { badRequest, body, bool, forbidden, json, notFound, num, q } from "../lib/http";
+import { greyballRoster, removeGreyball, setGreyball } from "../store/greyball";
 import type { RouteDef, RouteRequest } from "./types";
 
 const principalOf = (request: RouteRequest) => request.principal!;
@@ -273,6 +274,46 @@ export const adminRoutes: RouteDef[] = [
       }
       if (!deleteCustomMask(id)) throw notFound("no custom mask with that id");
       return json({ deleted: true });
+    },
+  },
+  {
+    method: "GET",
+    path: "/v1/admin/greyball",
+    tag: "admin",
+    summary: "Callers whose answers are invented: level 1 timetables only, level 2 everything",
+    handler: () => json({ actors: greyballRoster() }),
+  },
+  {
+    method: "POST",
+    path: "/v1/admin/greyball",
+    tag: "admin",
+    summary:
+      "Greyball a caller by actor: env, token:<id> or indiko:<sub>. 1 gives them plausible timetables, 2 invents people for them",
+    body: '{ "actor": "indiko:https://id.example/u/kieran", "level": 1, "note": "their choice" }',
+    handler: async (request) => {
+      const payload = await body<{ actor?: string; level?: number; note?: string | null }>(request);
+      const actor = payload.actor?.trim() ?? "";
+      if (!/^(env|token:\d+|indiko:.+)$/.test(actor)) {
+        throw badRequest('actor must be "env", "token:<id>" or "indiko:<sub>"');
+      }
+      if (payload.level !== 1 && payload.level !== 2) {
+        throw badRequest("level must be 1 (timetables only) or 2 (invented people)");
+      }
+      const note = payload.note?.trim() || null;
+      setGreyball(actor, payload.level, note);
+      return json({ actor, level: payload.level, note });
+    },
+  },
+  {
+    method: "POST",
+    path: "/v1/admin/greyball/remove",
+    tag: "admin",
+    summary: "Take a caller off the greyball list: real answers for them again",
+    body: '{ "actor": "indiko:https://id.example/u/kieran" }',
+    handler: async (request) => {
+      const payload = await body<{ actor?: string }>(request);
+      if (!removeGreyball(payload.actor?.trim() ?? "")) throw notFound("not on the greyball list");
+      return json({ removed: true });
     },
   },
   {

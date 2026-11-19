@@ -63,6 +63,7 @@ interface AuditRow {
 const TABS = {
   tokens: "tokens",
   roles: "roles & masks",
+  greyball: "greyball",
   audit: "audit log",
   canaries: "canaries",
 } as const;
@@ -187,6 +188,118 @@ async function tokensTab(
       }
     });
   }
+}
+
+interface GreyballRow {
+  actor: string;
+  level: number;
+  note: string | null;
+  updatedAt: string;
+  name: string;
+}
+
+/** Which callers see invented answers: level 1 is decoy timetables, level 2 decoy people everywhere. */
+async function greyballTab(el: HTMLElement): Promise<void> {
+  const [{ actors }, audit] = await Promise.all([
+    api<{ actors: GreyballRow[] }>("/v1/admin/greyball"),
+    api<{ rows: { actor: string; actorName: string }[] }>("/v1/admin/audit?limit=500"),
+  ]);
+  // The audit log is how we know who uses the app at all, so it is the picker.
+  const seen = new Map<string, string>();
+  for (const row of audit.rows) seen.set(row.actor, row.actorName);
+  const choices = [...seen]
+    .map(([actor, name]) => `<option value="${esc(actor)}">${esc(name)} (${esc(actor)})</option>`)
+    .join("");
+  const levels = (level: number) =>
+    `<select name="level">
+      <option value="1" ${level === 1 ? "selected" : ""}>1 · timetables</option>
+      <option value="2" ${level === 2 ? "selected" : ""}>2 · everything</option>
+    </select>`;
+  const rows = actors.length
+    ? actors
+        .map(
+          (p) => `<tr>
+            <td>${esc(p.name)}<div class="dim">${esc(p.actor)}</div></td>
+            <td>${levels(p.level)}</td>
+            <td><input data-note="${esc(p.actor)}" value="${esc(p.note ?? "")}" placeholder="why" /></td>
+            <td class="dim">${when(p.updatedAt)}</td>
+            <td><button data-save="${esc(p.actor)}">save</button> <button class="danger" data-remove="${esc(p.actor)}">remove</button></td>
+          </tr>`,
+        )
+        .join("")
+    : `<tr><td colspan="5" class="dim">Nobody is greyballed. Add somebody below.</td></tr>`;
+
+  el.innerHTML = `
+    <h2>greyball</h2>
+    <p class="note">Greyball picks a caller, not a person. Level 1 gives that caller a plausible timetable instead of the real one for anybody they look up: a student's schedule, a professor's teaching load, the exams that follow, and no sections in the history log. Everything else they see is true. Level 2 invents people for them outright, the way a canary token works. The key is the actor from the audit log: an indiko account, a minted token, or the shared env token. Greyballing an indiko account also covers every personal token that person mints. Removing an entry restores real answers at the next request.</p>
+    <div class="wrap"><table>
+      <thead><tr><th>caller</th><th>level</th><th>note</th><th>changed</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+    <h2>add somebody</h2>
+    <form class="row" id="add">
+      <input name="actor" list="actors" placeholder="who calls, from the audit log" required autocomplete="off" />
+      <datalist id="actors">${choices}</datalist>
+      ${levels(1)}
+      <input name="note" placeholder="why, optional" />
+      <button type="submit">greyball</button>
+    </form>`;
+
+  const save = async (actor: string, level: number, note: string | null) => {
+    try {
+      await api("/v1/admin/greyball", {
+        method: "POST",
+        body: { actor, level, note },
+      });
+      await greyballTab(el);
+    } catch (error) {
+      showError(el, error);
+    }
+  };
+
+  for (const button of el.querySelectorAll<HTMLButtonElement>("[data-save]")) {
+    button.addEventListener("click", () => {
+      const row = button.closest("tr")!;
+      const level = Number(row.querySelector<HTMLSelectElement>("select[name=level]")!.value);
+      const note = row.querySelector<HTMLInputElement>("input[data-note]")!.value;
+      void save(button.dataset.save!, level, note || null);
+    });
+  }
+
+  for (const button of el.querySelectorAll<HTMLButtonElement>("[data-remove]")) {
+    button.addEventListener("click", async () => {
+      if (button.dataset.confirm !== "1") {
+        button.dataset.confirm = "1";
+        button.textContent = "remove? click again";
+        return;
+      }
+      try {
+        await api("/v1/admin/greyball/remove", {
+          method: "POST",
+          body: { actor: button.dataset.remove! },
+        });
+        await greyballTab(el);
+      } catch (error) {
+        showError(el, error);
+      }
+    });
+  }
+
+  el.querySelector("#add")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.target as HTMLFormElement);
+    const raw = String(form.get("actor") ?? "").trim();
+    if (!/^(env|token:\d+|indiko:.+)$/.test(raw)) {
+      showError(
+        el,
+        new Error('Pick an actor from the list, or type "env", "token:<id>" or "indiko:<sub>".'),
+      );
+      return;
+    }
+    const level = Number(form.get("level"));
+    const note = (String(form.get("note") ?? "").trim() || null) as string | null;
+    await save(raw, level, note);
+  });
 }
 
 function customMasks(masks: Roles["masks"], maskable: Roles["maskable"]): string {
@@ -494,6 +607,7 @@ async function route(): Promise<void> {
   try {
     if (active === "tokens") await tokensTab(el);
     if (active === "roles") await rolesTab(el);
+    if (active === "greyball") await greyballTab(el);
     if (active === "audit") await auditTab(el, filters, false);
     if (active === "canaries") await auditTab(el, filters, true);
   } catch (error) {
