@@ -28,6 +28,12 @@ final class Library {
     private static let syncedKey = "syncedAt"
     private static let accessKey = "access"
     private static let recentLimit = 12
+    /// How long a foregrounded app goes before resyncing on its own.
+    private static let foregroundWindow: TimeInterval = 3600
+    /// A copy older than this is not trusted to show at launch; the role fingerprint is kept, the rest is not.
+    private static let maxAge: TimeInterval = 24 * 3600
+    /// The last foreground check, so launch and the first foreground don't both fire.
+    private var checkedAt = Date.distantPast
 
     init(api: API) {
         self.api = api
@@ -41,15 +47,41 @@ final class Library {
     func load() async {
         guard !loaded else { return }
         loaded = true
+        checkedAt = .now
 
-        async let cachedPhotos = try? api.photos(.cache)
-        async let cachedGlossary = try? api.glossary(.cache)
-        async let cachedPeople = Self.readDirectory()
-        if let photos = await cachedPhotos { self.photos = photos }
-        if let glossary = await cachedGlossary { self.glossary = glossary }
-        if let people = await cachedPeople { install(people) }
+        // Recents carry dorm and room in them, so they age with the copy.
+        if let age = syncedAt.map({ Date.now.timeIntervalSince($0) }), age > Self.maxAge {
+            Disk.clear()
+            UserDefaults.standard.removeObject(forKey: Self.recentsKey)
+            UserDefaults.standard.removeObject(forKey: Self.syncedKey)
+            recents = []
+            syncedAt = nil
+        } else {
+            async let cachedPhotos = try? api.photos(.cache)
+            async let cachedGlossary = try? api.glossary(.cache)
+            let cachedPeople = await Self.readDirectory()
+            if let photos = await cachedPhotos { self.photos = photos }
+            if let glossary = await cachedGlossary { self.glossary = glossary }
+            if let people = cachedPeople { install(people) }
+        }
 
         await refresh()
+    }
+
+    /// One request whenever the app comes forward: re-check who we are now, and resync if the role
+    /// changed or the copy has aged past the foreground window.
+    func foregroundCheck() async {
+        guard !syncing, Date.now.timeIntervalSince(checkedAt) > 60 else { return }
+        checkedAt = .now
+        let access: String
+        do {
+            access = try await api.access()
+        } catch {
+            return
+        }
+        let changed = access != UserDefaults.standard.string(forKey: Self.accessKey)
+        let stale = syncedAt.map { Date.now.timeIntervalSince($0) > Self.foregroundWindow } ?? true
+        if changed || stale { await refresh() }
     }
 
     /// Pulls everything again. About twenty requests and a few megabytes.

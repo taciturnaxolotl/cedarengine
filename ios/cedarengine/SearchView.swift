@@ -4,6 +4,8 @@ struct SearchView: View {
     @State var library: Library
     let session: Session
 
+    @Environment(\.scenePhase) private var scenePhase
+
     @State private var query = ""
     @State private var remote: [Person] = []
     @State private var error: String?
@@ -109,6 +111,9 @@ struct SearchView: View {
                 await library.load()
             }
             .task(id: query) { await searchRemotely() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { Task { await library.foregroundCheck() } }
+            }
         }
     }
 
